@@ -1,0 +1,461 @@
+"""
+app/services/manager.py
+────────────────────────
+All Freshservice API calls for Manager / Admin features.
+Just like services/freshservice.py handles end-user calls,
+this file handles EVERYTHING a manager or admin needs.
+
+Rule: No route file talks to Freshservice directly.
+      All calls go through a service file like this one.
+"""
+
+import httpx
+from datetime import datetime, timezone
+from app.config import get_settings
+from typing import Optional
+
+
+# ── Label maps (same as in freshservice.py) ────────────────────────────────────
+PRIORITY_MAP = {1: "Low", 2: "Medium", 3: "High",    4: "Urgent"}
+STATUS_MAP   = {2: "Open", 3: "Pending", 4: "Resolved", 5: "Closed"}
+
+
+# ── HTTP client (same pattern as freshservice.py) ─────────────────────────────
+def _get_client() -> httpx.AsyncClient:
+    settings = get_settings()
+    return httpx.AsyncClient(
+        base_url=settings.freshservice_base_url,
+        auth=(settings.freshservice_api_key, "X"),
+        headers={"Content-Type": "application/json"},
+        timeout=20.0,
+    )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 1. GET USER ROLE
+# ══════════════════════════════════════════════════════════════════════════════
+async def get_user_role(email: str) -> dict:
+    """
+    Figures out who a person is in Freshservice.
+
+    Strategy:
+      - First check if the email belongs to an Agent (IT staff).
+      - If yes, check if they have a supervisor/manager role.
+      - If not an agent, they are a regular Requester (end user).
+
+    Returns a dict with role, display name, and permission flags.
+    """
+    async with _get_client() as client:
+
+        # ── Check if this email belongs to an Agent ────────────────
+        agent_resp = await client.get(
+            "/agents",
+            params={"email": email}
+        )
+
+        if agent_resp.status_code == 200:
+            agents = agent_resp.json().get("agents", [])
+
+            if agents:
+                agent = agents[0]
+                name  = f"{agent.get('first_name','')} {agent.get('last_name','')}".strip()
+
+                # Check their role name to see if they are a manager/supervisor
+                # Freshservice stores role_ids on the agent object
+                # We look at the agent's role to determine if manager
+                role_name  = agent.get("role", "").lower()
+                is_manager = any(word in role_name for word in
+                                 ["manager", "supervisor", "admin", "lead"])
+
+                # Also check if they are "account_admin" which is super admin
+                if agent.get("is_account_admin") or agent.get("is_admin"):
+                    is_manager = True
+
+                return {
+                    "email":                 email,
+                    "display_name":          name or email,
+                    "role":                  "manager" if is_manager else "agent",
+                    "is_manager":            is_manager,
+                    "is_agent":              True,
+                    "is_requester":          False,
+                    "can_view_team_tickets": True,
+                    "can_view_analytics":    is_manager,
+                    "can_assign_tickets":    True,
+                }
+
+        # ── Not an agent — check if they are a Requester ──────────
+        req_resp = await client.get(
+            "/requesters",
+            params={"email": email}
+        )
+
+        if req_resp.status_code == 200:
+            requesters = req_resp.json().get("requesters", [])
+            if requesters:
+                req  = requesters[0]
+                name = f"{req.get('first_name','')} {req.get('last_name','')}".strip()
+                return {
+                    "email":                 email,
+                    "display_name":          name or email,
+                    "role":                  "requester",
+                    "is_manager":            False,
+                    "is_agent":              False,
+                    "is_requester":          True,
+                    "can_view_team_tickets": False,
+                    "can_view_analytics":    False,
+                    "can_assign_tickets":    False,
+                }
+
+        # ── Email not found anywhere in Freshservice ───────────────
+        return {
+            "email":                 email,
+            "display_name":          email,
+            "role":                  "unknown",
+            "is_manager":            False,
+            "is_agent":              False,
+            "is_requester":          False,
+            "can_view_team_tickets": False,
+            "can_view_analytics":    False,
+            "can_assign_tickets":    False,
+        }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 2. GET ALL TEAM TICKETS
+# ══════════════════════════════════════════════════════════════════════════════
+async def get_team_tickets(
+    status:   Optional[int] = None,
+    priority: Optional[int] = None,
+    per_page: int = 20,
+) -> list:
+    """
+    Fetches ALL tickets across the entire Freshservice account.
+    Managers use this to see the full picture of what is happening.
+
+    Optional filters:
+      status   — 2=Open 3=Pending 4=Resolved 5=Closed
+      priority — 1=Low 2=Medium 3=High 4=Urgent
+    """
+    async with _get_client() as client:
+
+        # Build filter query for the Freshservice filter endpoint
+        conditions = []
+        if status   is not None:
+            conditions.append(f"status:{status}")
+        if priority is not None:
+            conditions.append(f"priority:{priority}")
+
+        if conditions:
+            query = '"' + " AND ".join(conditions) + '"'
+            resp  = await client.get(
+                "/tickets/filter",
+                params={"query": query, "per_page": per_page}
+            )
+        else:
+            # No filters — get all tickets ordered by newest first
+            resp = await client.get(
+                "/tickets",
+                params={
+                    "per_page":   per_page,
+                    "order_type": "desc",
+                    "order_by":   "created_at",
+                }
+            )
+
+        resp.raise_for_status()
+        raw_tickets = resp.json().get("tickets", [])
+
+        now = datetime.now(timezone.utc)
+        result = []
+
+        for t in raw_tickets:
+            # Figure out if ticket is overdue
+            is_overdue = False
+            due_by_str = t.get("due_by")
+            if due_by_str:
+                try:
+                    due_dt     = datetime.fromisoformat(due_by_str.replace("Z", "+00:00"))
+                    is_overdue = now > due_dt and t.get("status", 2) not in [4, 5]
+                except Exception:
+                    pass
+
+            result.append({
+                "ticket_id":      t.get("id"),
+                "subject":        t.get("subject", ""),
+                "status_label":   STATUS_MAP.get(t.get("status", 2), "Unknown"),
+                "priority_label": PRIORITY_MAP.get(t.get("priority", 2), "Unknown"),
+                "requester":      str(t.get("requester_id", "Unknown")),
+                "assigned_to":    str(t.get("responder_id", "Unassigned")),
+                "group":          str(t.get("group_id", "No Group")),
+                "created_at":     t.get("created_at", ""),
+                "due_by":         due_by_str,
+                "is_overdue":     is_overdue,
+            })
+
+        return result
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 3. GET ANALYTICS SUMMARY
+# ══════════════════════════════════════════════════════════════════════════════
+async def get_analytics() -> dict:
+    """
+    Builds a snapshot of the IT support desk by fetching
+    tickets of each status and counting them.
+
+    Makes multiple small API calls and combines the results.
+    This gives the manager a full picture in one agent message.
+    """
+    async with _get_client() as client:
+
+        # Helper to count tickets matching a filter query
+        async def count_tickets(query: str) -> int:
+            try:
+                r = await client.get(
+                    "/tickets/filter",
+                    params={"query": f'"{query}"', "per_page": 1}
+                )
+                if r.status_code == 200:
+                    return r.json().get("total", 0)
+            except Exception:
+                pass
+            return 0
+
+        # Count tickets by status
+        total_open     = await count_tickets("status:2")
+        total_pending  = await count_tickets("status:3")
+        total_resolved = await count_tickets("status:4")
+        total_closed   = await count_tickets("status:5")
+        urgent_count   = await count_tickets("priority:4")
+        high_count     = await count_tickets("priority:3")
+
+        # Count overdue tickets (open + pending past due date)
+        now = datetime.now(timezone.utc)
+        overdue_count = 0
+
+        try:
+            open_resp = await client.get(
+                "/tickets",
+                params={"per_page": 100, "order_type": "desc"}
+            )
+            if open_resp.status_code == 200:
+                for t in open_resp.json().get("tickets", []):
+                    if t.get("status") in [2, 3] and t.get("due_by"):
+                        try:
+                            due = datetime.fromisoformat(
+                                t["due_by"].replace("Z", "+00:00")
+                            )
+                            if now > due:
+                                overdue_count += 1
+                        except Exception:
+                            pass
+        except Exception:
+            pass
+
+        return {
+            "total_open":          total_open,
+            "total_pending":       total_pending,
+            "total_resolved":      total_resolved,
+            "total_closed":        total_closed,
+            "overdue_count":       overdue_count,
+            "high_priority_count": high_count,
+            "urgent_count":        urgent_count,
+            "created_today":       0,   # Freshservice API does not support date filter easily
+            "resolved_today":      0,
+        }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 4. GET SLA BREACHES
+# ══════════════════════════════════════════════════════════════════════════════
+async def get_sla_breaches() -> list:
+    """
+    Finds all open/pending tickets that are EITHER:
+      - Already past their due date (breached)
+      - Due within the next 4 hours (at risk)
+
+    Returns them sorted by urgency so the manager knows
+    which ones to deal with first.
+    """
+    async with _get_client() as client:
+        resp = await client.get(
+            "/tickets",
+            params={
+                "per_page":   100,
+                "order_type": "asc",
+                "order_by":   "due_by",
+            }
+        )
+        resp.raise_for_status()
+
+        tickets = resp.json().get("tickets", [])
+        now     = datetime.now(timezone.utc)
+        result  = []
+
+        for t in tickets:
+            # Only look at open or pending tickets
+            if t.get("status") not in [2, 3]:
+                continue
+
+            due_by_str = t.get("due_by")
+            if not due_by_str:
+                continue
+
+            try:
+                due_dt       = datetime.fromisoformat(due_by_str.replace("Z", "+00:00"))
+                diff_seconds = (due_dt - now).total_seconds()
+
+                # Categorise the breach status
+                if diff_seconds < 0:
+                    breach_status = "already_breached"
+                elif diff_seconds <= 3600:          # within 1 hour
+                    breach_status = "breach_in_1hr"
+                elif diff_seconds <= 14400:         # within 4 hours
+                    breach_status = "breach_in_4hrs"
+                else:
+                    continue    # Not at risk yet — skip
+
+                result.append({
+                    "ticket_id":      t.get("id"),
+                    "subject":        t.get("subject", ""),
+                    "priority_label": PRIORITY_MAP.get(t.get("priority", 2), "Unknown"),
+                    "status_label":   STATUS_MAP.get(t.get("status", 2), "Unknown"),
+                    "requester":      str(t.get("requester_id", "Unknown")),
+                    "due_by":         due_by_str,
+                    "breach_status":  breach_status,
+                    "assigned_to":    str(t.get("responder_id", "Unassigned")),
+                })
+
+            except Exception:
+                continue
+
+        # Sort: already breached first, then closest to breaching
+        order = {"already_breached": 0, "breach_in_1hr": 1, "breach_in_4hrs": 2}
+        result.sort(key=lambda x: order.get(x["breach_status"], 3))
+
+        return result
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 5. GET ASSETS FOR A USER
+# ══════════════════════════════════════════════════════════════════════════════
+async def get_assets_for_user(email: str) -> list:
+    """
+    Finds all IT assets assigned to a specific user.
+    First looks up the requester ID from email,
+    then fetches assets assigned to that requester.
+    """
+    async with _get_client() as client:
+
+        # Step 1: Get requester ID from email
+        req_resp = await client.get("/requesters", params={"email": email})
+        req_resp.raise_for_status()
+
+        requesters = req_resp.json().get("requesters", [])
+        if not requesters:
+            return []
+
+        requester_id   = requesters[0]["id"]
+        requester_name = (
+            f"{requesters[0].get('first_name','')} "
+            f"{requesters[0].get('last_name','')}".strip()
+        )
+
+        # Step 2: Get assets assigned to that requester
+        asset_resp = await client.get(
+            "/assets",
+            params={"user_id": requester_id}
+        )
+
+        if asset_resp.status_code != 200:
+            return []
+
+        assets = asset_resp.json().get("assets", [])
+        result = []
+
+        for a in assets:
+            result.append({
+                "asset_id":    a.get("id"),
+                "name":        a.get("name", ""),
+                "asset_type":  a.get("asset_type_name", "Unknown"),
+                "serial":      a.get("asset_tag"),
+                "status":      a.get("asset_state", "Unknown"),
+                "assigned_to": requester_name,
+            })
+
+        return result
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 6. SEARCH KNOWLEDGE BASE
+# ══════════════════════════════════════════════════════════════════════════════
+async def search_knowledge_base(query: str) -> list:
+    """
+    Searches Freshservice's knowledge base (Solutions)
+    for articles matching the search query.
+
+    Used BEFORE creating a ticket — show the user a
+    self-service article if one exists.
+    """
+    async with _get_client() as client:
+        resp = await client.get(
+            "/solutions/articles/search",
+            params={"term": query, "per_page": 5}
+        )
+
+        if resp.status_code != 200:
+            return []
+
+        articles = resp.json().get("articles", [])
+        result   = []
+
+        for a in articles:
+            result.append({
+                "article_id":  a.get("id"),
+                "title":       a.get("title", ""),
+                "description": a.get("description_text", "")[:200] + "..."
+                               if len(a.get("description_text", "")) > 200
+                               else a.get("description_text", ""),
+                "category":    a.get("folder_name", "General"),
+                "status":      "Published" if a.get("status") == 2 else "Draft",
+                "url":         None,   # Freshservice API does not return direct URL
+            })
+
+        return result
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 7. ASSIGN TICKET TO AGENT
+# ══════════════════════════════════════════════════════════════════════════════
+async def assign_ticket(ticket_id: int, agent_email: str) -> dict:
+    """
+    Assigns an existing ticket to a specific agent.
+    First looks up the agent ID from their email,
+    then updates the ticket's responder_id.
+    """
+    async with _get_client() as client:
+
+        # Step 1: Get agent ID from email
+        agent_resp = await client.get("/agents", params={"email": agent_email})
+        agent_resp.raise_for_status()
+
+        agents = agent_resp.json().get("agents", [])
+        if not agents:
+            raise ValueError(f"No agent found with email: {agent_email}")
+
+        agent    = agents[0]
+        agent_id = agent["id"]
+        name     = f"{agent.get('first_name','')} {agent.get('last_name','')}".strip()
+
+        # Step 2: Update the ticket with the new responder
+        update_resp = await client.put(
+            f"/tickets/{ticket_id}",
+            json={"responder_id": agent_id}
+        )
+        update_resp.raise_for_status()
+
+        return {
+            "ticket_id":   ticket_id,
+            "assigned_to": name,
+            "agent_id":    agent_id,
+        }
