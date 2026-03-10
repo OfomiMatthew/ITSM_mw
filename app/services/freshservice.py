@@ -232,3 +232,43 @@ async def add_note(ticket_id: int, body: str, private: bool = True) -> dict:
         )
         response.raise_for_status()
         return response.json()
+
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# NEW ENDPOINT 4 — CREATE A NEW REQUESTER (USER)
+# Paste this into the bottom of app/services/freshservice.py
+# ══════════════════════════════════════════════════════════════════════════════
+async def create_requester(
+    first_name: str,
+    last_name:  str,
+    email:      str,
+) -> dict:
+    """
+    Creates a new requester (employee) in Freshservice.
+
+    Used when a brand new employee tries to use the agent
+    for the first time and does not exist in Freshservice yet.
+
+    The agent calls this automatically if get_user_role()
+    returns role: 'unknown' — it creates them on the spot
+    so they can start raising tickets immediately.
+    """
+    async with _get_client() as client:
+        resp = await client.post(
+            "/requesters",
+            json={
+                "first_name":    first_name,
+                "last_name":     last_name,
+                "primary_email": email,
+            }
+        )
+        resp.raise_for_status()
+
+        req = resp.json().get("requester", {})
+
+        return {
+            "requester_id": req.get("id"),
+            "name":         f"{first_name} {last_name}".strip(),
+            "email":        email,
+        }

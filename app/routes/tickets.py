@@ -195,3 +195,44 @@ async def add_note(ticket_id: int, body: AddNoteRequest):
             success=False,
             message=f"Failed to add note to ticket #{ticket_id}: {str(e)}",
         )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# NEW ROUTE 4 — CREATE A NEW REQUESTER
+# Add this to the bottom of app/routes/tickets.py
+# ══════════════════════════════════════════════════════════════════════════════
+@router.post(
+    "/requesters",
+    summary="Create a new requester (employee)",
+    description=(
+        "Creates a brand new employee in Freshservice as a requester. "
+        "Called automatically when a new employee uses the agent for "
+        "the first time and does not yet exist in Freshservice."
+    ),
+    status_code=201,
+)
+async def create_requester(
+    first_name: str = Query(..., description="First name of the new employee"),
+    last_name:  str = Query(..., description="Last name of the new employee"),
+    email:      str = Query(..., description="Work email address"),
+):
+    """
+    Power Automate HTTP action:
+        Method: POST
+        URI:    https://your-app.azurewebsites.net/tickets/requesters
+                    ?first_name=John&last_name=Smith&email=john@company.com
+        Header: x-api-key = <middleware key>
+    """
+    try:
+        result = await fs.create_requester(first_name, last_name, email)
+        return {
+            "success": True,
+            "message": f"Requester {result['name']} created successfully. They can now raise tickets.",
+            **result,
+        }
+
+    except Exception as e:
+        return {
+            "success": False,
+            "message": f"Could not create requester: {str(e)}",
+        }
