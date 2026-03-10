@@ -405,3 +405,90 @@ async def assign_ticket(
             success=False,
             message=f"Could not assign ticket: {str(e)}",
         )
+
+
+
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# RESOLVE TICKET — Manager/Agent only
+# ══════════════════════════════════════════════════════════════════════════════
+@manager_router.post(
+    "/tickets/{ticket_id}/resolve",
+    summary="Resolve a ticket",
+    description=(
+        "Marks a ticket as Resolved and adds a resolution note. "
+        "The requester gets an email notification automatically. "
+        "Only agents and managers can resolve tickets."
+    ),
+)
+async def resolve_ticket(
+    ticket_id:       int,
+    resolution_note: str = Query(
+        ...,
+        min_length=10,
+        description="What fixed the issue? Minimum 10 characters."
+    ),
+):
+    """
+    Power Automate HTTP action:
+        Method: POST
+        URI:    https://your-app.azurewebsites.net/manager/tickets/147/resolve
+                    ?resolution_note=Reinstalled+WiFi+driver
+        Header: x-api-key = <middleware key>
+    """
+    try:
+        await ms.resolve_ticket(ticket_id, resolution_note)
+        return {
+            "success":   True,
+            "ticket_id": ticket_id,
+            "message":   (
+                f"Ticket #{ticket_id} has been marked as Resolved. "
+                f"The requester has been notified by email."
+            ),
+        }
+    except Exception as e:
+        return {
+            "success":   False,
+            "ticket_id": ticket_id,
+            "message":   str(e),
+        }
+        
+        
+        
+
+# ══════════════════════════════════════════════════════════════════════════════
+# UPDATE TICKET — Manager/Agent only
+# ══════════════════════════════════════════════════════════════════════════════
+@manager_router.put(
+    "/tickets/{ticket_id}",
+    summary="Update a ticket",
+    description=(
+        "Updates a ticket's priority and/or status. "
+        "Only agents and managers can update tickets. "
+        "Send 0 for any field you do not want to change."
+    ),
+)
+async def update_ticket(
+    ticket_id:    int,
+    new_priority: int = Query(0, description="1=Low 2=Medium 3=High 4=Urgent. Send 0 to skip."),
+    new_status:   int = Query(0, description="2=Open 3=Pending 4=Resolved 5=Closed. Send 0 to skip."),
+):
+    """
+    Power Automate HTTP action:
+        Method: PUT
+        URI:    https://your-app.azurewebsites.net/manager/tickets/147
+                    ?new_priority=3&new_status=2
+        Header: x-api-key = <middleware key>
+    """
+    try:
+        result = await ms.update_ticket(ticket_id, new_priority, new_status)
+        return {
+            "success": True,
+            **result,
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "message": str(e),
+        }

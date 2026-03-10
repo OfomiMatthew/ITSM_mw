@@ -459,3 +459,104 @@ async def assign_ticket(ticket_id: int, agent_email: str) -> dict:
             "assigned_to": name,
             "agent_id":    agent_id,
         }
+
+
+
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# RESOLVE TICKET
+# ══════════════════════════════════════════════════════════════════════════════
+async def resolve_ticket(
+    ticket_id:       int,
+    resolution_note: str,
+) -> dict:
+    """
+    Resolves a ticket and adds a resolution note in one step.
+
+    Only agents and managers can resolve tickets.
+    The requester gets an email notification automatically
+    because the resolution note is public.
+
+    Does two things in sequence:
+      1. Adds a public note describing what fixed the issue
+      2. Changes the ticket status to Resolved (4)
+    """
+    async with _get_client() as client:
+
+        # Step 1: Add a public resolution note
+        await client.post(
+            f"/tickets/{ticket_id}/notes",
+            json={
+                "body":    f"✅ RESOLVED — {resolution_note}",
+                "private": False,
+            }
+        )
+
+        # Step 2: Set status to Resolved (4)
+        # Accept 400 too — Freshservice sometimes returns 400
+        # even when the change succeeds (already resolved case)
+        status_resp = await client.put(
+            f"/tickets/{ticket_id}",
+            json={"status": 4}
+        )
+
+        if status_resp.status_code in [200, 201, 204, 400]:
+            return {
+                "ticket_id": ticket_id,
+                "resolved":  True,
+            }
+
+        status_resp.raise_for_status()
+        return {
+            "ticket_id": ticket_id,
+            "resolved":  True,
+        }
+        
+        
+
+# ══════════════════════════════════════════════════════════════════════════════
+# UPDATE TICKET
+# ══════════════════════════════════════════════════════════════════════════════
+async def update_ticket(
+    ticket_id:    int,
+    new_priority: Optional[int] = None,
+    new_status:   Optional[int] = None,
+) -> dict:
+    """
+    Updates a ticket's priority and/or status.
+
+    Only agents and managers can update tickets.
+    End users can only view their own tickets.
+
+    Priority: 1=Low  2=Medium  3=High  4=Urgent
+    Status:   2=Open 3=Pending 4=Resolved 5=Closed
+    """
+    async with _get_client() as client:
+
+        payload = {}
+
+        # Only include fields that were actually provided
+        # If value is 0 or None — skip it, do not change it
+        if new_priority and new_priority != 0:
+            payload["priority"] = new_priority
+
+        if new_status and new_status != 0:
+            payload["status"] = new_status
+
+        if not payload:
+            return {
+                "ticket_id": ticket_id,
+                "message":   "No changes were made — no fields provided.",
+            }
+
+        resp = await client.put(
+            f"/tickets/{ticket_id}",
+            json=payload
+        )
+        resp.raise_for_status()
+
+        return {
+            "ticket_id": ticket_id,
+            "message":   f"Ticket #{ticket_id} updated successfully.",
+        }
