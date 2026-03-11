@@ -10,7 +10,7 @@ Rule: No route file talks to Freshservice directly.
 """
 
 import httpx
-from datetime import datetime, timezone
+from datetime import datetime, timezone,timedelta
 from app.config import get_settings
 from typing import Optional
 
@@ -559,4 +559,107 @@ async def update_ticket(
         return {
             "ticket_id": ticket_id,
             "message":   f"Ticket #{ticket_id} updated successfully.",
+        }
+        
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# NEW ENDPOINT 2 — WEEKLY REPORT
+# Service function to add to: app/services/manager.py
+# ══════════════════════════════════════════════════════════════════════════════
+async def get_weekly_report() -> dict:
+    """
+    Generates a summary of IT support performance for the past 7 days.
+
+    Returns:
+      - How many tickets were created this week
+      - How many were resolved
+      - How many are still open
+      - Average resolution time (hours)
+      - Breakdown by priority
+      - Breakdown by category
+
+    Why this matters:
+      Managers need to report upwards. Without this they have to manually
+      pull data from Freshservice and build spreadsheets. This gives them
+      a full weekly summary in one chat message — copy-paste ready for
+      a management report.
+    """
+    async with _get_client() as client:
+        now = datetime.now(timezone.utc)
+        week_ago = now - timedelta(days=7)
+        week_ago_str = week_ago.strftime("%Y-%m-%d")
+
+        # Fetch tickets created in the last 7 days
+        resp = await client.get(
+            f"/tickets?per_page=100&updated_since={week_ago_str}"
+        )
+        resp.raise_for_status()
+        all_tickets = resp.json().get("tickets", [])
+
+        # Filter to only those created this week
+        created_this_week = []
+        for t in all_tickets:
+            created_at = t.get("created_at", "")
+            try:
+                created = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+                if created >= week_ago:
+                    created_this_week.append(t)
+            except Exception:
+                pass
+
+        # Count metrics
+        total_created  = len(created_this_week)
+        total_resolved = sum(1 for t in created_this_week if t.get("status") in [4, 5])
+        total_open     = sum(1 for t in created_this_week if t.get("status") in [2, 3])
+
+        # Priority breakdown
+        priority_counts = {1: 0, 2: 0, 3: 0, 4: 0}
+        for t in created_this_week:
+            p = t.get("priority", 2)
+            priority_counts[p] = priority_counts.get(p, 0) + 1
+
+        # Average resolution time (for resolved tickets)
+        resolution_times = []
+        for t in created_this_week:
+            if t.get("status") in [4, 5]:
+                try:
+                    created = datetime.fromisoformat(t["created_at"].replace("Z", "+00:00"))
+                    updated = datetime.fromisoformat(t["updated_at"].replace("Z", "+00:00"))
+                    hours = (updated - created).total_seconds() / 3600
+                    resolution_times.append(hours)
+                except Exception:
+                    pass
+
+        avg_resolution_hours = (
+            round(sum(resolution_times) / len(resolution_times), 1)
+            if resolution_times else None
+        )
+
+        week_label = f"{week_ago.strftime('%d %b')} - {now.strftime('%d %b %Y')}"
+
+        summary = (
+            f"Weekly IT Support Report\n"
+            f"{week_label}\n"
+            f"{'='*35}\n"
+            f"Tickets Created:   {total_created}\n"
+            f"Tickets Resolved:  {total_resolved}\n"
+            f"Still Open:        {total_open}\n"
+            f"Avg Resolution:    {f'{avg_resolution_hours}h' if avg_resolution_hours else 'N/A'}\n"
+            f"{'='*35}\n"
+            f"By Priority:\n"
+            f"  Urgent:   {priority_counts.get(4, 0)}\n"
+            f"  High:     {priority_counts.get(3, 0)}\n"
+            f"  Medium:   {priority_counts.get(2, 0)}\n"
+            f"  Low:      {priority_counts.get(1, 0)}\n"
+        )
+
+        return {
+            "week": week_label,
+            "total_created": total_created,
+            "total_resolved": total_resolved,
+            "total_open": total_open,
+            "avg_resolution_hours": avg_resolution_hours,
+            "priority_breakdown": priority_counts,
+            "summary": summary,
         }

@@ -492,3 +492,24 @@ async def update_ticket(
             "success": False,
             "message": str(e),
         }
+        
+        
+        
+        
+@manager_router.get(
+    "/reports/weekly",
+    summary="Get weekly IT support performance report",
+    description=(
+        "Returns a summary of IT support activity for the past 7 days. "
+        "Includes tickets created, resolved, still open, average resolution time, "
+        "and breakdown by priority. "
+        "Managers can copy this directly into a management report."
+    ),
+    dependencies=[Depends(verify_api_key)],
+)
+async def get_weekly_report():
+    try:
+        result = await ms.get_weekly_report()
+        return {"success": True, **result}
+    except Exception as e:
+        return {"success": False, "message": str(e)}
