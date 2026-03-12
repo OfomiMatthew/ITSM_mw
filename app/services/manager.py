@@ -663,3 +663,62 @@ async def get_weekly_report() -> dict:
             "priority_breakdown": priority_counts,
             "summary": summary,
         }
+        
+        
+        
+# NEW ENDPOINT 4 — GET UNASSIGNED TICKETS
+# Service function to add to: app/services/manager.py
+# ══════════════════════════════════════════════════════════════════════════════
+async def get_unassigned_tickets() -> dict:
+    """
+    Returns all open tickets that have no agent assigned to them.
+ 
+    Why this matters:
+      Unassigned tickets are the biggest risk in any IT helpdesk.
+      They are open, visible to the user, but nobody is working on them.
+      They will breach SLA. Users will chase. Managers will get complaints.
+ 
+      This endpoint lets a manager say "show me unassigned tickets" and
+      immediately see what needs to be actioned — then use the Assign
+      Ticket endpoint to distribute the work.
+    """
+    async with _get_client() as client:
+        # Fetch all open tickets
+        resp = await client.get("/tickets?per_page=100")
+        resp.raise_for_status()
+        tickets = resp.json().get("tickets", [])
+ 
+        # Filter to those with no responder assigned
+        unassigned = [
+            t for t in tickets
+            if not t.get("responder_id")
+        ]
+ 
+        if not unassigned:
+            return {
+                "unassigned_count": 0,
+                "tickets": [],
+                "summary": "Great news! All open tickets currently have an agent assigned.",
+            }
+ 
+        lines = []
+        for t in unassigned[:20]:
+            priority = PRIORITY_MAP.get(t.get("priority"), "?")
+            created  = t.get("created_at", "")[:10]  # just the date
+            lines.append(
+                f"#{t['id']}: {t['subject']} | {priority} | Created: {created}"
+            )
+ 
+        summary = (
+            f"WARNING: {len(unassigned)} open ticket(s) with no agent assigned:\n\n"
+            + "\n".join(lines)
+        )
+        if len(unassigned) > 20:
+            summary += f"\n...and {len(unassigned) - 20} more."
+ 
+        return {
+            "unassigned_count": len(unassigned),
+            "tickets": unassigned,
+            "summary": summary,
+        }
+        

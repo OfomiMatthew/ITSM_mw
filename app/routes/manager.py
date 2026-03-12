@@ -513,3 +513,21 @@ async def get_weekly_report():
         return {"success": True, **result}
     except Exception as e:
         return {"success": False, "message": str(e)}
+
+
+@manager_router.get(
+    "/tickets/unassigned",
+    summary="Get all open tickets with no agent assigned",
+    description=(
+        "Returns every open ticket that currently has no IT agent assigned to it. "
+        "Unassigned tickets are the biggest SLA risk - open but nobody working on them. "
+        "Use this with the Assign Ticket endpoint to quickly distribute the work."
+    ),
+    dependencies=[Depends(verify_api_key)],
+)
+async def get_unassigned_tickets():
+    try:
+        result = await ms.get_unassigned_tickets()
+        return {"success": True, **result}
+    except Exception as e:
+        return {"success": False, "message": str(e)}
