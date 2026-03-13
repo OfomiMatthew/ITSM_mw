@@ -121,46 +121,109 @@ async def get_ticket(ticket_id: int) -> dict:
 # ── GET TICKETS BY EMAIL ───────────────────────────────────────────────────────
 
 async def get_tickets_by_email(email: str, status: Optional[int] = 2) -> list:
-    """
-    Step 1: Look up the requester ID from their email address.
-    Step 2: Use that ID to filter tickets via the filter endpoint.
-    This two-step approach is the correct way per Freshservice API v2 docs.
-    """
     async with _get_client() as client:
 
-        # ── STEP 1: Get requester ID from email ───────────────────
-        requester_resp = await client.get(
-            "/requesters",
-            params={"email": email}
-        )
+        # ── STEP 1: Try requester lookup first ────────────────────
+        requester_resp = await client.get("/requesters", params={"email": email})
         requester_resp.raise_for_status()
-
         requesters = requester_resp.json().get("requesters", [])
-        if not requesters:
-            # No requester found with that email — return empty list
-            return []
 
-        requester_id = requesters[0]["id"]
+        if requesters:
+            requester_id = requesters[0]["id"]
+        else:
+            # ── STEP 1b: Not a requester — try agents endpoint ────
+            agent_resp = await client.get("/agents", params={"email": email})
+            agent_resp.raise_for_status()
+            agents = agent_resp.json().get("agents", [])
+
+            if not agents:
+                # Not a requester OR an agent — truly not found
+                return []
+
+            requester_id = agents[0]["id"]
 
         # ── STEP 2: Filter tickets by requester_id ────────────────
-        # Build the query string — status is optional
         if status is not None:
-            query = f'"requester_id:{requester_id} AND status:{status}"'
+            url = f'/tickets/filter?query="requester_id:{requester_id} AND status:{status}"&per_page=10&order_type=desc'
         else:
-            query = f'"requester_id:{requester_id}"'
+            url = f'/tickets/filter?query="requester_id:{requester_id}"&per_page=10&order_type=desc'
 
-        tickets_resp = await client.get(
-            "/tickets/filter",
-            params={
-                "query":      query,
-                "per_page":   10,
-                "order_type": "desc",
-            }
-        )
+        tickets_resp = await client.get(url)
         tickets_resp.raise_for_status()
 
         tickets = tickets_resp.json().get("tickets", [])
         return [_normalise_ticket(t) for t in tickets]
+
+# async def get_tickets_by_email(email: str, status: Optional[int] = 2) -> list:
+#     async with _get_client() as client:
+
+#         # ── STEP 1: Get requester ID from email ───────────────────
+#         requester_resp = await client.get(
+#             "/requesters",
+#             params={"email": email}
+#         )
+#         requester_resp.raise_for_status()
+
+#         requesters = requester_resp.json().get("requesters", [])
+#         if not requesters:
+#             return []
+
+#         requester_id = requesters[0]["id"]
+
+#         # ── STEP 2: Filter tickets ─────────────────────────────────
+#         # ✅ Build URL manually — httpx must NOT encode the quotes
+#         # Freshservice filter endpoint requires literal "..." in the URL
+#         if status is not None:
+#             url = f'/tickets/filter?query="requester_id:{requester_id} AND status:{status}"&per_page=10&order_type=desc'
+#         else:
+#             url = f'/tickets/filter?query="requester_id:{requester_id}"&per_page=10&order_type=desc'
+
+#         tickets_resp = await client.get(url)
+#         tickets_resp.raise_for_status()
+
+#         tickets = tickets_resp.json().get("tickets", [])
+#         return [_normalise_ticket(t) for t in tickets]
+# async def get_tickets_by_email(email: str, status: Optional[int] = 2) -> list:
+#     """
+#     Step 1: Look up the requester ID from their email address.
+#     Step 2: Use that ID to filter tickets via the filter endpoint.
+#     This two-step approach is the correct way per Freshservice API v2 docs.
+#     """
+#     async with _get_client() as client:
+
+#         # ── STEP 1: Get requester ID from email ───────────────────
+#         requester_resp = await client.get(
+#             "/requesters",
+#             params={"email": email}
+#         )
+#         requester_resp.raise_for_status()
+
+#         requesters = requester_resp.json().get("requesters", [])
+#         if not requesters:
+#             # No requester found with that email — return empty list
+#             return []
+
+#         requester_id = requesters[0]["id"]
+
+#         # ── STEP 2: Filter tickets by requester_id ────────────────
+#         # Build the query string — status is optional
+#         if status is not None:
+#             query = f"requester_id:{requester_id} AND status:{status}"
+#         else:
+#             query = f"requester_id:{requester_id}"
+
+#         tickets_resp = await client.get(
+#             "/tickets/filter",
+#             params={
+#                 "query":      query,
+#                 "per_page":   10,
+#                 "order_type": "desc",
+#             }
+#         )
+#         tickets_resp.raise_for_status()
+
+#         tickets = tickets_resp.json().get("tickets", [])
+#         return [_normalise_ticket(t) for t in tickets]
       
 # async def get_tickets_by_email(email: str, status: Optional[int] = 2) -> list:
 #     """
