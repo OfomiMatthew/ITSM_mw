@@ -561,3 +561,29 @@ async def close_ticket(
         return {"success": True, **result}
     except Exception as e:
         return {"success": False, "ticket_id": ticket_id, "message": str(e)}
+    
+    
+    
+# ══════════════════════════════════════════════════════════════════════════════
+# GET /manager/tickets/{id}/assignee  — Who is assigned to this ticket
+# ══════════════════════════════════════════════════════════════════════════════
+@manager_router.get(
+    "/tickets/{ticket_id}/assignee",
+    summary="Get the agent assigned to a specific ticket",
+    description=(
+        "Returns the full name and email of the agent currently "
+        "assigned to the given ticket. "
+        "Returns assigned=false if the ticket has no agent yet."
+    ),
+    dependencies=[Depends(verify_api_key)],
+)
+async def get_ticket_assignee(ticket_id: int):
+    try:
+        result = await ms.get_ticket_assignee(ticket_id)
+        return {"success": True, **result}
+    except Exception as e:
+        return {
+            "success":   False,
+            "ticket_id": ticket_id,
+            "message":   str(e),
+        }

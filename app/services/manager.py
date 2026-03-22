@@ -945,4 +945,110 @@ async def close_ticket(ticket_id: int, closing_note: str) -> dict:
             "status":    5,
             "message":   f"Ticket #{ticket_id} has been permanently closed.",
         }
+        
 
+# async def get_ticket_assignee(ticket_id: int) -> dict:
+#     """
+#     Returns the agent currently assigned to a ticket.
+#     Looks up the agent's full name and email from their ID.
+#     """
+#     async with _get_client() as client:
+
+#         # Step 1 — fetch the ticket
+#         # ticket_resp = await client.get(f"/tickets/{ticket_id}")
+#         ticket_resp = await client.get(f"/tickets/{ticket_id}?include=requester")
+#         ticket_resp.raise_for_status()
+#         ticket = ticket_resp.json().get("ticket", {})
+
+#         responder_id = ticket.get("responder_id")
+
+#         # Step 2 — if no agent assigned, return early
+#         if not responder_id:
+#             return {
+#                 "ticket_id":     ticket_id,
+#                 "subject":       ticket.get("subject", ""),
+#                 "assigned":      False,
+#                 "agent_id":      None,
+#                 "agent_name":    "Unassigned",
+#                 "agent_email":   "",
+#                 "message":       f"Ticket #{ticket_id} is not assigned to anyone yet.",
+#             }
+
+#         # Step 3 — look up the agent by their ID
+#         agent_resp = await client.get(f"/agents/{responder_id}")
+#         agent_resp.raise_for_status()
+#         agent = agent_resp.json().get("agent", {})
+
+#         first      = agent.get("first_name", "")
+#         last       = agent.get("last_name", "")
+#         agent_name = f"{first} {last}".strip() or "Unknown"
+
+#         return {
+#             "ticket_id":   ticket_id,
+#             "subject":     ticket.get("subject", ""),
+#             "assigned":    True,
+#             "agent_id":    responder_id,
+#             "agent_name":  agent_name,
+#             "agent_email": agent.get("email", ""),
+#             "message":     f"Ticket #{ticket_id} is assigned to {agent_name}.",
+#         }
+
+# =═════════════════════════════════════════════════════════════════════════════
+# NEW ENDPOINT 3 — GET TICKET ASSIGNEE
+# =═════════════════════════════════════════════════════════════════════════════
+
+async def get_ticket_assignee(ticket_id: int) -> dict:
+    """
+    Returns the agent currently assigned to a ticket.
+    Also returns the requester name and email.
+    """
+    async with _get_client() as client:
+
+        # Step 1 — fetch the ticket with requester embedded
+        ticket_resp = await client.get(f"/tickets/{ticket_id}?include=requester")
+        ticket_resp.raise_for_status()
+        ticket = ticket_resp.json().get("ticket", {})
+
+        # Extract requester details from embedded requester object
+        requester       = ticket.get("requester", {})
+        first           = requester.get("first_name", "")
+        last            = requester.get("last_name", "")
+        requester_name  = requester.get("name") or f"{first} {last}".strip() or "Unknown"
+        requester_email = requester.get("email", "")
+
+        responder_id = ticket.get("responder_id")
+
+        # Step 2 — if no agent assigned, return early
+        if not responder_id:
+            return {
+                "ticket_id":       ticket_id,
+                "subject":         ticket.get("subject", ""),
+                "assigned":        False,
+                "agent_id":        None,
+                "agent_name":      "Unassigned",
+                "agent_email":     "",
+                "requester_name":  requester_name,
+                "requester_email": requester_email,
+                "message":         f"Ticket #{ticket_id} is not assigned to anyone yet.",
+            }
+
+        # Step 3 — look up the agent by their ID
+        agent_resp = await client.get(f"/agents/{responder_id}")
+        agent_resp.raise_for_status()
+        agent = agent_resp.json().get("agent", {})
+
+        first      = agent.get("first_name", "")
+        last       = agent.get("last_name", "")
+        agent_name = f"{first} {last}".strip() or "Unknown"
+
+        return {
+            "ticket_id":       ticket_id,
+            "subject":         ticket.get("subject", ""),
+            "assigned":        True,
+            "agent_id":        responder_id,
+            "agent_name":      agent_name,
+            "agent_email":     agent.get("email", ""),
+            "requester_name":  requester_name,
+            "requester_email": requester_email,
+            "message":         f"Ticket #{ticket_id} is assigned to {agent_name}.",
+        }
