@@ -123,6 +123,78 @@ async def get_user_role(email: str) -> dict:
 # ══════════════════════════════════════════════════════════════════════════════
 # 2. GET ALL TEAM TICKETS
 # ══════════════════════════════════════════════════════════════════════════════
+# async def get_team_tickets(
+#     status:   Optional[int] = None,
+#     priority: Optional[int] = None,
+#     per_page: int = 20,
+# ) -> list:
+#     """
+#     Fetches ALL tickets across the entire Freshservice account.
+#     Managers use this to see the full picture of what is happening.
+
+#     Optional filters:
+#       status   — 2=Open 3=Pending 4=Resolved 5=Closed
+#       priority — 1=Low 2=Medium 3=High 4=Urgent
+#     """
+#     async with _get_client() as client:
+
+#         # Build filter query for the Freshservice filter endpoint
+#         conditions = []
+#         if status   is not None:
+#             conditions.append(f"status:{status}")
+#         if priority is not None:
+#             conditions.append(f"priority:{priority}")
+
+#         if conditions:
+#             query = '"' + " AND ".join(conditions) + '"'
+#             resp  = await client.get(
+#                 "/tickets/filter",
+#                 params={"query": query, "per_page": per_page}
+#             )
+#         else:
+#             # No filters — get all tickets ordered by newest first
+#             resp = await client.get(
+#                 "/tickets",
+#                 params={
+#                     "per_page":   per_page,
+#                     "order_type": "desc",
+#                     "order_by":   "created_at",
+#                 }
+#             )
+
+#         resp.raise_for_status()
+#         raw_tickets = resp.json().get("tickets", [])
+
+#         now = datetime.now(timezone.utc)
+#         result = []
+
+#         for t in raw_tickets:
+#             # Figure out if ticket is overdue
+#             is_overdue = False
+#             due_by_str = t.get("due_by")
+#             if due_by_str:
+#                 try:
+#                     due_dt     = datetime.fromisoformat(due_by_str.replace("Z", "+00:00"))
+#                     is_overdue = now > due_dt and t.get("status", 2) not in [4, 5]
+#                 except Exception:
+#                     pass
+
+#             result.append({
+#                 "ticket_id":      t.get("id"),
+#                 "subject":        t.get("subject", ""),
+#                 "status_label":   STATUS_MAP.get(t.get("status", 2), "Unknown"),
+#                 "priority_label": PRIORITY_MAP.get(t.get("priority", 2), "Unknown"),
+#                 "requester":      str(t.get("requester_id", "Unknown")),
+#                 "assigned_to":    str(t.get("responder_id", "Unassigned")),
+#                 "group":          str(t.get("group_id", "No Group")),
+#                 "created_at":     t.get("created_at", ""),
+#                 "due_by":         due_by_str,
+#                 "is_overdue":     is_overdue,
+#             })
+
+#         return result
+
+
 async def get_team_tickets(
     status:   Optional[int] = None,
     priority: Optional[int] = None,
@@ -138,7 +210,19 @@ async def get_team_tickets(
     """
     async with _get_client() as client:
 
-        # Build filter query for the Freshservice filter endpoint
+        # ── STEP 1: Fetch agents once to build id → name lookup ───
+        agents_resp = await client.get("/agents", params={"per_page": 100})
+        agents_map  = {}  # {agent_id: "Full Name"}
+        if agents_resp.is_success:
+            for a in agents_resp.json().get("agents", []):
+                agent_id   = a.get("id")
+                first      = a.get("first_name", "")
+                last       = a.get("last_name", "")
+                full_name  = f"{first} {last}".strip() or "Unknown"
+                if agent_id:
+                    agents_map[agent_id] = full_name
+
+        # ── STEP 2: Fetch tickets ──────────────────────────────────
         conditions = []
         if status   is not None:
             conditions.append(f"status:{status}")
@@ -149,29 +233,46 @@ async def get_team_tickets(
             query = '"' + " AND ".join(conditions) + '"'
             resp  = await client.get(
                 "/tickets/filter",
-                params={"query": query, "per_page": per_page}
+                params={
+                    "query":    query,
+                    "per_page": per_page,
+                    "include":  "requester",    # ← NEW
+                }
             )
         else:
-            # No filters — get all tickets ordered by newest first
             resp = await client.get(
                 "/tickets",
                 params={
                     "per_page":   per_page,
                     "order_type": "desc",
                     "order_by":   "created_at",
+                    "include":    "requester",  # ← NEW
                 }
             )
 
         resp.raise_for_status()
         raw_tickets = resp.json().get("tickets", [])
 
-        now = datetime.now(timezone.utc)
+        # ── STEP 3: Build result with names ───────────────────────
+        now    = datetime.now(timezone.utc)
         result = []
 
         for t in raw_tickets:
-            # Figure out if ticket is overdue
-            is_overdue = False
-            due_by_str = t.get("due_by")
+
+            # Requester name + email from embedded requester object
+            requester       = t.get("requester", {})
+            first           = requester.get("first_name", "")
+            last            = requester.get("last_name", "")
+            requester_name  = requester.get("name") or f"{first} {last}".strip() or "Unknown"
+            requester_email = requester.get("email", "")
+
+            # Agent name from lookup dict built in Step 1
+            responder_id    = t.get("responder_id")
+            assigned_to     = agents_map.get(responder_id, "Unassigned")
+
+            # Overdue check
+            is_overdue  = False
+            due_by_str  = t.get("due_by")
             if due_by_str:
                 try:
                     due_dt     = datetime.fromisoformat(due_by_str.replace("Z", "+00:00"))
@@ -180,19 +281,22 @@ async def get_team_tickets(
                     pass
 
             result.append({
-                "ticket_id":      t.get("id"),
-                "subject":        t.get("subject", ""),
-                "status_label":   STATUS_MAP.get(t.get("status", 2), "Unknown"),
-                "priority_label": PRIORITY_MAP.get(t.get("priority", 2), "Unknown"),
-                "requester":      str(t.get("requester_id", "Unknown")),
-                "assigned_to":    str(t.get("responder_id", "Unassigned")),
-                "group":          str(t.get("group_id", "No Group")),
-                "created_at":     t.get("created_at", ""),
-                "due_by":         due_by_str,
-                "is_overdue":     is_overdue,
+                "ticket_id":       t.get("id"),
+                "subject":         t.get("subject", ""),
+                "status_label":    STATUS_MAP.get(t.get("status", 2), "Unknown"),
+                "priority_label":  PRIORITY_MAP.get(t.get("priority", 2), "Unknown"),
+                "requester":       requester_name,    # ← now a real name
+                "requester_email": requester_email,   # ← NEW
+                "assigned_to":     assigned_to,       # ← now a real name
+                "group":           str(t.get("group_id", "No Group")),
+                "created_at":      t.get("created_at", ""),
+                "due_by":          due_by_str,
+                "is_overdue":      is_overdue,
             })
 
         return result
+
+
 
 
 # ══════════════════════════════════════════════════════════════════════════════

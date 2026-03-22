@@ -49,6 +49,7 @@ class TeamTicketOut(BaseModel):
     status_label:   str
     priority_label: str
     requester:      str           # Name of the person who raised it
+    requester_email: Optional[str] = None
     assigned_to:    str           # Name of agent it is assigned to
     group:          str           # Which IT group owns it
     created_at:     str
