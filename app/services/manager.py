@@ -773,56 +773,176 @@ async def get_weekly_report() -> dict:
 # NEW ENDPOINT 4 — GET UNASSIGNED TICKETS
 # Service function to add to: app/services/manager.py
 # ══════════════════════════════════════════════════════════════════════════════
+# async def get_unassigned_tickets() -> dict:
+#     """
+#     Returns all open tickets that have no agent assigned to them.
+ 
+#     Why this matters:
+#       Unassigned tickets are the biggest risk in any IT helpdesk.
+#       They are open, visible to the user, but nobody is working on them.
+#       They will breach SLA. Users will chase. Managers will get complaints.
+ 
+#       This endpoint lets a manager say "show me unassigned tickets" and
+#       immediately see what needs to be actioned — then use the Assign
+#       Ticket endpoint to distribute the work.
+#     """
+#     async with _get_client() as client:
+#         # Fetch all open tickets
+#         resp = await client.get("/tickets?per_page=100")
+#         resp.raise_for_status()
+#         tickets = resp.json().get("tickets", [])
+ 
+#         # Filter to those with no responder assigned
+#         unassigned = [
+#             t for t in tickets
+#             if not t.get("responder_id")
+#         ]
+ 
+#         if not unassigned:
+#             return {
+#                 "unassigned_count": 0,
+#                 "tickets": [],
+#                 "summary": "Great news! All open tickets currently have an agent assigned.",
+#             }
+ 
+#         lines = []
+#         for t in unassigned[:20]:
+#             priority = PRIORITY_MAP.get(t.get("priority"), "?")
+#             created  = t.get("created_at", "")[:10]  # just the date
+#             lines.append(
+#                 f"#{t['id']}: {t['subject']} | {priority} | Created: {created}"
+#             )
+ 
+#         summary = (
+#             f"WARNING: {len(unassigned)} open ticket(s) with no agent assigned:\n\n"
+#             + "\n".join(lines)
+#         )
+#         if len(unassigned) > 20:
+#             summary += f"\n...and {len(unassigned) - 20} more."
+ 
+#         return {
+#             "unassigned_count": len(unassigned),
+#             "tickets": unassigned,
+#             "summary": summary,
+#         }
+
+
 async def get_unassigned_tickets() -> dict:
-    """
-    Returns all open tickets that have no agent assigned to them.
- 
-    Why this matters:
-      Unassigned tickets are the biggest risk in any IT helpdesk.
-      They are open, visible to the user, but nobody is working on them.
-      They will breach SLA. Users will chase. Managers will get complaints.
- 
-      This endpoint lets a manager say "show me unassigned tickets" and
-      immediately see what needs to be actioned — then use the Assign
-      Ticket endpoint to distribute the work.
-    """
     async with _get_client() as client:
-        # Fetch all open tickets
-        resp = await client.get("/tickets?per_page=100")
+
+        # include=requester embeds the requester object in each ticket
+        resp = await client.get(
+            "/tickets",
+            params={
+                "per_page": 100,
+                "include":  "requester",    # ← NEW
+            }
+        )
         resp.raise_for_status()
         tickets = resp.json().get("tickets", [])
- 
-        # Filter to those with no responder assigned
+
+        # Filter to only unassigned tickets
         unassigned = [
             t for t in tickets
             if not t.get("responder_id")
         ]
- 
+
         if not unassigned:
             return {
                 "unassigned_count": 0,
-                "tickets": [],
-                "summary": "Great news! All open tickets currently have an agent assigned.",
+                "tickets":          [],
+                "summary":          "Great news! All open tickets currently have an agent assigned.",
             }
- 
-        lines = []
+
+        # Build result with requester name + email
+        result = []
+        lines  = []
+
         for t in unassigned[:20]:
-            priority = PRIORITY_MAP.get(t.get("priority"), "?")
-            created  = t.get("created_at", "")[:10]  # just the date
+            # Extract requester name and email from embedded requester object
+            requester       = t.get("requester", {})
+            first           = requester.get("first_name", "")
+            last            = requester.get("last_name", "")
+            requester_name  = requester.get("name") or f"{first} {last}".strip() or "Unknown"
+            requester_email = requester.get("email", "")
+
+            priority   = PRIORITY_MAP.get(t.get("priority"), "?")
+            created    = t.get("created_at", "")[:10]
+
+            result.append({
+                "ticket_id":       t.get("id"),
+                "subject":         t.get("subject", ""),
+                "status_label":    STATUS_MAP.get(t.get("status"), "Unknown"),
+                "priority_label":  priority,
+                "requester_name":  requester_name,    # ← NEW
+                "requester_email": requester_email,   # ← NEW
+                "created_at":      t.get("created_at", ""),
+                "due_by":          t.get("due_by"),
+            })
+
             lines.append(
-                f"#{t['id']}: {t['subject']} | {priority} | Created: {created}"
+                f"#{t.get('id')}: {t.get('subject')} | "
+                f"{priority} | {requester_name} | Created: {created}"
             )
- 
+
         summary = (
             f"WARNING: {len(unassigned)} open ticket(s) with no agent assigned:\n\n"
             + "\n".join(lines)
         )
         if len(unassigned) > 20:
             summary += f"\n...and {len(unassigned) - 20} more."
- 
+
         return {
             "unassigned_count": len(unassigned),
-            "tickets": unassigned,
-            "summary": summary,
+            "tickets":          result,
+            "summary":          summary,
         }
         
+        
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 8. CLOSE TICKET
+# ══════════════════════════════════════════════════════════════════════════════
+
+async def close_ticket(ticket_id: int, closing_note: str) -> dict:
+    """
+    Permanently closes a ticket.
+    Freshservice requires two steps — resolve first (4), then close (5).
+    Jumping straight to Closed from Open/Pending causes a 400 error.
+    """
+    async with _get_client() as client:
+
+        # Step 1 — add private closing note
+        await client.post(
+            f"/tickets/{ticket_id}/notes",
+            json={
+                "body":    closing_note,
+                "private": True,
+            }
+        )
+
+        # Step 2 — set to Resolved (4) first
+        # Freshservice rejects a direct jump to Closed (5) from Open/Pending
+        resolve_resp = await client.put(
+            f"/tickets/{ticket_id}",
+            json={"status": 4}
+        )
+        # Accept 400 here — Freshservice sometimes returns 400 even on success
+        # for status transitions (known Freshservice quirk)
+        if resolve_resp.status_code not in [200, 201, 400]:
+            resolve_resp.raise_for_status()
+
+        # Step 3 — now set to Closed (5)
+        close_resp = await client.put(
+            f"/tickets/{ticket_id}",
+            json={"status": 5}
+        )
+        if close_resp.status_code not in [200, 201, 400]:
+            close_resp.raise_for_status()
+
+        return {
+            "ticket_id": ticket_id,
+            "status":    5,
+            "message":   f"Ticket #{ticket_id} has been permanently closed.",
+        }
+

@@ -43,22 +43,29 @@ def _get_client() -> httpx.AsyncClient:
 
 
 # ── Internal helper ────────────────────────────────────────────────────────────
+
+
 # def _normalise_ticket(raw: dict) -> dict:
-#     """
-#     Maps raw Freshservice ticket fields to our clean internal shape.
-#     This is what gets returned to Power Automate / Copilot Studio.
-#     """
+#     requester      = raw.get("requester", {})
+#     first          = requester.get("first_name", "")
+#     last           = requester.get("last_name", "")
+#     requester_name = requester.get("name") or f"{first} {last}".strip() or "Unknown"
+
 #     return {
-#         "ticket_id":      raw.get("id"),
-#         "subject":        raw.get("subject", ""),
-#         "status":         raw.get("status", 2),
-#         "status_label":   STATUS_MAP.get(raw.get("status", 2), "Unknown"),
-#         "priority":       raw.get("priority", 2),
-#         "priority_label": PRIORITY_MAP.get(raw.get("priority", 2), "Unknown"),
-#         "created_at":     raw.get("created_at", ""),
-#         "due_by":         raw.get("due_by"),
-#         "requester_id":   raw.get("requester_id"),
+#         "ticket_id":       raw.get("id"),
+#         "subject":         raw.get("subject", ""),
+#         "status":          raw.get("status", 2),
+#         "status_label":    STATUS_MAP.get(raw.get("status", 2), "Unknown"),
+#         "priority":        raw.get("priority", 2),
+#         "priority_label":  PRIORITY_MAP.get(raw.get("priority", 2), "Unknown"),
+#         "created_at":      raw.get("created_at", ""),
+#         "due_by":          raw.get("due_by"),
+#         "requester_id":    raw.get("requester_id"),
+#         "requester_name":  requester_name,
+#         "requester_email": requester.get("email", ""),
 #     }
+
+
 
 def _normalise_ticket(raw: dict) -> dict:
     requester      = raw.get("requester", {})
@@ -66,11 +73,13 @@ def _normalise_ticket(raw: dict) -> dict:
     last           = requester.get("last_name", "")
     requester_name = requester.get("name") or f"{first} {last}".strip() or "Unknown"
 
+    status = raw.get("status")   # ← no default — trust exactly what Freshservice returns
+
     return {
         "ticket_id":       raw.get("id"),
         "subject":         raw.get("subject", ""),
-        "status":          raw.get("status", 2),
-        "status_label":    STATUS_MAP.get(raw.get("status", 2), "Unknown"),
+        "status":          status,
+        "status_label":    STATUS_MAP.get(status, "Unknown"),   # ← no default fallback to Open
         "priority":        raw.get("priority", 2),
         "priority_label":  PRIORITY_MAP.get(raw.get("priority", 2), "Unknown"),
         "created_at":      raw.get("created_at", ""),
@@ -118,94 +127,6 @@ async def create_ticket(data: dict) -> dict:
 
 
 # ── GET TICKET BY ID ───────────────────────────────────────────────────────────
-# async def get_ticket(ticket_id: int) -> dict:
-#     """
-#     Fetches a single ticket by its ID.
-
-#     Args:
-#         ticket_id: The Freshservice ticket number (e.g. 3)
-
-#     Returns:
-#         Normalised ticket dict
-
-#     Raises:
-#         httpx.HTTPStatusError — 404 if ticket not found
-#     """
-#     async with _get_client() as client:
-#         response = await client.get(f"/tickets/{ticket_id}")
-#         response.raise_for_status()
-#         ticket = response.json().get("ticket", {})
-#         return _normalise_ticket(ticket)
-
-
-
-# async def get_ticket(ticket_id: int) -> dict:
-#     """
-#     Fetches a single ticket by its ID, including the requester's name.
-
-#     Args:
-#         ticket_id: The Freshservice ticket number (e.g. 3)
-
-#     Returns:
-#         Normalised ticket dict with requester_name and requester_email added
-
-#     Raises:
-#         httpx.HTTPStatusError — 404 if ticket not found
-#     """
-#     async with _get_client() as client:
-#         response = await client.get(f"/tickets/{ticket_id}?include=requester")  # ← CHANGED
-#         response.raise_for_status()
-#         ticket = response.json().get("ticket", {})
-
-#         # Extract requester name from the embedded requester object
-#         requester      = ticket.get("requester", {})                                        # ← NEW
-#         requester_name = requester.get("name") or requester.get("full_name") or "Unknown"  # ← NEW
-
-#         result = _normalise_ticket(ticket)
-#         result["requester_name"]  = requester_name               # ← NEW
-#         result["requester_email"] = requester.get("email", "")   # ← NEW
-#         return result
-
-
-# async def get_ticket(ticket_id: int) -> dict:
-#     """
-#     Fetches a single ticket by its ID, including the requester's name.
-#     Uses ?include=requester to embed the requester object in one call.
-#     Falls back to a second /requesters/{id} call if name is missing.
-#     """
-#     async with _get_client() as client:
-
-#         # Step 1 — fetch ticket with requester embedded
-#         response = await client.get(f"/tickets/{ticket_id}?include=requester")
-#         response.raise_for_status()
-#         ticket = response.json().get("ticket", {})
-
-#         # Step 2 — try to get name from embedded requester object
-#         requester      = ticket.get("requester", {})
-#         requester_name = requester.get("name") or requester.get("full_name", "")
-
-#         # Step 3 — fallback: if name still empty, look up by requester_id directly
-#         if not requester_name:
-#             requester_id = ticket.get("requester_id")
-#             if requester_id:
-#                 try:
-#                     req_resp = await client.get(f"/requesters/{requester_id}")
-#                     if req_resp.is_success:
-#                         req_data       = req_resp.json().get("requester", {})
-#                         first          = req_data.get("first_name", "")
-#                         last           = req_data.get("last_name", "")
-#                         requester_name = f"{first} {last}".strip()
-#                         requester      = req_data   # also grab email from here
-#                 except Exception:
-#                     requester_name = "Unknown"
-
-#         # Step 4 — build final result
-#         result = _normalise_ticket(ticket)
-#         result["requester_name"]  = requester_name or "Unknown"
-#         result["requester_email"] = requester.get("email", "")
-#         return result
-
-
 async def get_ticket(ticket_id: int) -> dict:
     async with _get_client() as client:
         response = await client.get(f"/tickets/{ticket_id}?include=requester")  # ← only change here
@@ -251,7 +172,8 @@ async def get_ticket(ticket_id: int) -> dict:
 #         return [_normalise_ticket(t) for t in tickets]
     
    
-async def get_tickets_by_email(email: str, status: Optional[int] = 2) -> list:
+# async def get_tickets_by_email(email: str, status: Optional[int] = 2) -> list:
+async def get_tickets_by_email(email: str, status: Optional[int] = None) -> list:
     async with _get_client() as client:
 
         # ── STEP 1: Try requester lookup first ────────────────────
@@ -331,26 +253,140 @@ async def update_ticket(ticket_id: int, updates: dict) -> dict:
 
 
 # ── ADD NOTE TO TICKET ─────────────────────────────────────────────────────────
-async def add_note(ticket_id: int, body: str, private: bool = True) -> dict:
+# async def add_note(ticket_id: int, body: str, private: bool = True) -> dict:
+#     """
+#     Adds a note/comment to an existing ticket.
+
+#     Args:
+#         ticket_id: The ticket to comment on
+#         body:      The note text
+#         private:   True = internal note (only agents see it)
+#                    False = public reply (requester gets notified)
+
+#     Returns:
+#         Raw note response from Freshservice
+#     """
+#     async with _get_client() as client:
+#         response = await client.post(
+#             f"/tickets/{ticket_id}/notes",
+#             json={"body": body, "private": private},
+#         )
+#         response.raise_for_status()
+#         return response.json()
+
+
+
+
+# async def add_note(
+#     ticket_id:      int,
+#     body:           str,
+#     private:        bool = True,
+#     author_name:    str  = "",
+#     author_email:   str  = "",
+# ) -> dict:
+#     """
+#     Adds a note to a ticket.
+#     Includes the author's name in the note body so Freshservice
+#     shows who actually wrote it — not just the API key owner.
+#     """
+#     # Prefix the note with the author's name so it is always visible
+#     if author_name:
+#         formatted_body = (
+#             f"📝 Note added by: {author_name}"
+#             + (f" ({author_email})" if author_email else "")
+#             + f"\n{'─' * 40}\n"
+#             + body
+#         )
+#     else:
+#         formatted_body = body
+
+#     async with _get_client() as client:
+#         response = await client.post(
+#             f"/tickets/{ticket_id}/notes",
+#             json={
+#                 "body":    formatted_body,
+#                 "private": private,
+#             },
+#         )
+#         response.raise_for_status()
+#         return {
+#             "ticket_id":    ticket_id,
+#             "note_body":    formatted_body,
+#             "private":      private,
+#             "author_name":  author_name  or "Unknown",
+#             "author_email": author_email or "",
+#             "message":      f"Note added to ticket #{ticket_id} by {author_name or 'Unknown'}.",
+#         }
+
+async def add_note(
+    ticket_id:    int,
+    body:         str,
+    private:      bool = True,
+    author_name:  str  = "",
+    author_email: str  = "",
+) -> dict:
     """
-    Adds a note/comment to an existing ticket.
-
-    Args:
-        ticket_id: The ticket to comment on
-        body:      The note text
-        private:   True = internal note (only agents see it)
-                   False = public reply (requester gets notified)
-
-    Returns:
-        Raw note response from Freshservice
+    Adds a note to a ticket.
+    If author_email is provided, verifies the person exists
+    in Freshservice before allowing the note to be added.
     """
     async with _get_client() as client:
+
+        # ── Check if the author exists in Freshservice ─────────────
+        # Only runs if an email was provided
+        if author_email:
+
+            # Check requesters first
+            req_resp   = await client.get("/requesters", params={"email": author_email})
+            found_user = (
+                req_resp.is_success and
+                len(req_resp.json().get("requesters", [])) > 0
+            )
+
+            # If not a requester, check agents
+            if not found_user:
+                agent_resp = await client.get("/agents", params={"email": author_email})
+                found_user = (
+                    agent_resp.is_success and
+                    len(agent_resp.json().get("agents", [])) > 0
+                )
+
+            # If not found anywhere — block the note
+            if not found_user:
+                raise ValueError(
+                    f"User '{author_email}' does not exist in Freshservice. "
+                    f"Only registered users and agents can add notes to tickets."
+                )
+
+        # ── Format the note body with author attribution ────────────
+        if author_name:
+            formatted_body = (
+                f"📝 Note added by: {author_name}"
+                + (f" ({author_email})" if author_email else "")
+                + f"\n{'─' * 40}\n"
+                + body
+            )
+        else:
+            formatted_body = body
+
+        # ── Post the note to Freshservice ───────────────────────────
         response = await client.post(
             f"/tickets/{ticket_id}/notes",
-            json={"body": body, "private": private},
+            json={
+                "body":    formatted_body,
+                "private": private,
+            },
         )
         response.raise_for_status()
-        return response.json()
+
+        return {
+            "ticket_id":    ticket_id,
+            "note_body":    formatted_body,
+            "private":      private,
+            "author_name":  author_name  or "Unknown",
+            "author_email": author_email or "",
+            "message":      f"Note added to ticket #{ticket_id} by {author_name or 'Unknown'}.",
+        }
 
 
 

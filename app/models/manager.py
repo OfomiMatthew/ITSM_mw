@@ -38,23 +38,38 @@ class UserRoleResponse(BaseModel):
 # TEAM TICKETS MODELS
 # ══════════════════════════════════════════════════════════════
 
+# class TeamTicketOut(BaseModel):
+#     """
+#     A single ticket in the team view.
+#     Includes extra fields managers care about
+#     (who it is assigned to, which group, department).
+#     """
+#     ticket_id:      int
+#     subject:        str
+#     status_label:   str
+#     priority_label: str
+#     requester:      str           # Name of the person who raised it
+#     requester_email: Optional[str] = None
+#     assigned_to:    str           # Name of agent it is assigned to
+#     group:          str           # Which IT group owns it
+#     created_at:     str
+#     due_by:         Optional[str] = None
+#     is_overdue:     bool = False  # True if past the due date
+
+
 class TeamTicketOut(BaseModel):
-    """
-    A single ticket in the team view.
-    Includes extra fields managers care about
-    (who it is assigned to, which group, department).
-    """
-    ticket_id:      int
-    subject:        str
-    status_label:   str
-    priority_label: str
-    requester:      str           # Name of the person who raised it
+    ticket_id:       int
+    subject:         str
+    status_label:    str
+    priority_label:  str
+    requester:       str                    # Name of the person who raised it
+    requester_name:  Optional[str] = None  # ← ADD THIS
     requester_email: Optional[str] = None
-    assigned_to:    str           # Name of agent it is assigned to
-    group:          str           # Which IT group owns it
-    created_at:     str
-    due_by:         Optional[str] = None
-    is_overdue:     bool = False  # True if past the due date
+    assigned_to:     str
+    group:           str
+    created_at:      str
+    due_by:          Optional[str] = None
+    is_overdue:      bool = False
 
 
 class TeamTicketsResponse(BaseModel):
@@ -104,19 +119,30 @@ class AnalyticsResponse(BaseModel):
 # SLA BREACH MODELS
 # ══════════════════════════════════════════════════════════════
 
+# class SLABreachTicket(BaseModel):
+#     """
+#     A single ticket that is at risk of or has already
+#     breached its SLA deadline.
+#     """
+#     ticket_id:      int
+#     subject:        str
+#     priority_label: str
+#     status_label:   str
+#     requester:      str
+#     due_by:         str
+#     breach_status:  str   # "already_breached", "breach_in_1hr", "breach_in_4hrs"
+#     assigned_to:    str
+
 class SLABreachTicket(BaseModel):
-    """
-    A single ticket that is at risk of or has already
-    breached its SLA deadline.
-    """
-    ticket_id:      int
-    subject:        str
-    priority_label: str
-    status_label:   str
-    requester:      str
-    due_by:         str
-    breach_status:  str   # "already_breached", "breach_in_1hr", "breach_in_4hrs"
-    assigned_to:    str
+    ticket_id:       int
+    subject:         str
+    priority_label:  str
+    status_label:    str
+    requester:       str
+    requester_email: Optional[str] = None  # ← ADD THIS
+    due_by:          str
+    breach_status:   str
+    assigned_to:     str
 
 
 class SLABreachResponse(BaseModel):

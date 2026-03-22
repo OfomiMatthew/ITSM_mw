@@ -531,3 +531,33 @@ async def get_unassigned_tickets():
         return {"success": True, **result}
     except Exception as e:
         return {"success": False, "message": str(e)}
+    
+    
+    
+# =══════════════════════════════════════════════════════════════════════════════
+# CLOSE TICKET — Manager/Agent only
+# ══════════════════════════════════════════════════════════════════════════════
+
+@manager_router.post(
+    "/tickets/{ticket_id}/close",
+    summary="Permanently close a ticket",
+    description=(
+        "Sets ticket status to Closed (5). Unlike Resolved (4), "
+        "a closed ticket cannot be reopened by the requester. "
+        "Adds a private closing note before closing."
+    ),
+    dependencies=[Depends(verify_api_key)],
+)
+async def close_ticket(
+    ticket_id:    int,
+    closing_note: str = Query(
+        ...,
+        min_length=5,
+        description="Reason for closing the ticket.",
+    ),
+):
+    try:
+        result = await ms.close_ticket(ticket_id, closing_note)
+        return {"success": True, **result}
+    except Exception as e:
+        return {"success": False, "ticket_id": ticket_id, "message": str(e)}

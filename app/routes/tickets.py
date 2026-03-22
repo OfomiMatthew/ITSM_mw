@@ -96,7 +96,7 @@ async def get_ticket(ticket_id: int):
 )
 async def list_tickets(
     email:  str           = Query(..., description="Requester email address"),
-    status: Optional[int] = Query(2,   description="Filter by status code. Default 2=Open. Pass null for all."),
+    status: Optional[int] = Query(None,   description="Filter by status code. 2=Open 3=Pending 4=Resolved 5=Closed. Leave blank for all."),
 ):
     """
     Example Power Automate HTTP action:
@@ -169,6 +169,34 @@ async def update_ticket(ticket_id: int, body: UpdateTicketRequest):
 
 
 # ── POST /tickets/{ticket_id}/notes ───────────────────────────────────────────
+# @router.post(
+#     "/{ticket_id}/notes",
+#     response_model=GenericResponse,
+#     status_code=201,
+#     summary="Add a note to a ticket",
+#     description="Called by Power Automate flow: **Add Note**.",
+# )
+# async def add_note(ticket_id: int, body: AddNoteRequest):
+#     """
+#     Example Power Automate HTTP action:
+#         Method: POST
+#         URI:    https://your-app.azurewebsites.net/tickets/@{variables('ticketId')}/notes
+#         Header: x-api-key = <your middleware key>
+#         Body:   { "body": "User called to follow up.", "private": true }
+#     """
+#     try:
+#         await fs.add_note(ticket_id, body.body, body.private)
+#         return GenericResponse(
+#             success=True,
+#             message=f"Note added to ticket #{ticket_id} successfully.",
+#         )
+#     except Exception as e:
+#         return GenericResponse(
+#             success=False,
+#             message=f"Failed to add note to ticket #{ticket_id}: {str(e)}",
+#         )
+
+
 @router.post(
     "/{ticket_id}/notes",
     response_model=GenericResponse,
@@ -182,13 +210,24 @@ async def add_note(ticket_id: int, body: AddNoteRequest):
         Method: POST
         URI:    https://your-app.azurewebsites.net/tickets/@{variables('ticketId')}/notes
         Header: x-api-key = <your middleware key>
-        Body:   { "body": "User called to follow up.", "private": true }
+        Body:   {
+                    "body":         "User called to follow up.",
+                    "private":      true,
+                    "author_name":  "Matthew Ofomi",
+                    "author_email": "mofomi@saconsulting.ai"
+                }
     """
     try:
-        await fs.add_note(ticket_id, body.body, body.private)
+        result = await fs.add_note(
+            ticket_id    = ticket_id,
+            body         = body.body,
+            private      = body.private,
+            author_name  = body.author_name,
+            author_email = body.author_email,
+        )
         return GenericResponse(
             success=True,
-            message=f"Note added to ticket #{ticket_id} successfully.",
+            message=result["message"],
         )
     except Exception as e:
         return GenericResponse(

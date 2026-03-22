@@ -4,23 +4,36 @@ from typing import Optional, List
 
 # ── Shared ticket shape returned by all ticket endpoints ───────────────────────
 
+# class TicketOut(BaseModel):
+#     """
+#     Normalised ticket object.
+#     FastAPI maps raw Freshservice fields to these clean names
+#     so Power Automate always gets a consistent shape.
+#     """
+#     ticket_id:      int
+#     subject:        str
+#     status:         int
+#     status_label:   str           # Human-readable: Open, Pending, Resolved, Closed
+#     priority:       int
+#     priority_label: str           # Human-readable: Low, Medium, High, Urgent
+#     created_at:     str
+#     due_by:         Optional[str] = None
+#     requester_id:   Optional[int] = None
+#     requester_name:  Optional[str] = None   # ← ADD THIS
+#     requester_email: Optional[str] = None   # ← ADD THIS (optional but useful)
+
 class TicketOut(BaseModel):
-    """
-    Normalised ticket object.
-    FastAPI maps raw Freshservice fields to these clean names
-    so Power Automate always gets a consistent shape.
-    """
-    ticket_id:      int
-    subject:        str
-    status:         int
-    status_label:   str           # Human-readable: Open, Pending, Resolved, Closed
-    priority:       int
-    priority_label: str           # Human-readable: Low, Medium, High, Urgent
-    created_at:     str
-    due_by:         Optional[str] = None
-    requester_id:   Optional[int] = None
-    requester_name:  Optional[str] = None   # ← ADD THIS
-    requester_email: Optional[str] = None   # ← ADD THIS (optional but useful)
+    ticket_id:       int
+    subject:         str
+    status:          Optional[int] = None   # ← Optional so None never coerces to 2
+    status_label:    Optional[str] = None   # ← Optional so Unknown never masks real value
+    priority:        Optional[int] = None
+    priority_label:  Optional[str] = None
+    created_at:      str
+    due_by:          Optional[str] = None
+    requester_id:    Optional[int] = None
+    requester_name:  Optional[str] = None
+    requester_email: Optional[str] = None
 
 
 # ── Per-endpoint response models ───────────────────────────────────────────────

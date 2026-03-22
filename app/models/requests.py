@@ -70,18 +70,39 @@ class UpdateTicketRequest(BaseModel):
     }
 
 
+# class AddNoteRequest(BaseModel):
+#     """
+#     Payload for adding a note/comment to an existing ticket.
+#     """
+#     body:    str  = Field(..., min_length=5, description="The note text")
+#     private: bool = Field(True, description="True = internal note, False = reply to requester")
+
+#     model_config = {
+#         "json_schema_extra": {
+#             "example": {
+#                 "body":    "User called to follow up. Issue is still happening after restart.",
+#                 "private": True,
+#             }
+#         }
+#     }
+
+
 class AddNoteRequest(BaseModel):
     """
     Payload for adding a note/comment to an existing ticket.
     """
-    body:    str  = Field(..., min_length=5, description="The note text")
-    private: bool = Field(True, description="True = internal note, False = reply to requester")
+    body:         str  = Field(..., min_length=5, description="The note text")
+    private:      bool = Field(True, description="True = internal note, False = reply to requester")
+    author_name:  str  = Field("",  description="Full name of the person adding the note")
+    author_email: str  = Field("",  description="Email of the person adding the note")
 
     model_config = {
         "json_schema_extra": {
             "example": {
-                "body":    "User called to follow up. Issue is still happening after restart.",
-                "private": True,
+                "body":         "User called to follow up. Issue is still happening after restart.",
+                "private":      True,
+                "author_name":  "John Doe",
+                "author_email": "jdoe@saconsulting.ai",
             }
         }
     }
