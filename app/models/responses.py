@@ -19,6 +19,8 @@ class TicketOut(BaseModel):
     created_at:     str
     due_by:         Optional[str] = None
     requester_id:   Optional[int] = None
+    requester_name:  Optional[str] = None   # ← ADD THIS
+    requester_email: Optional[str] = None   # ← ADD THIS (optional but useful)
 
 
 # ── Per-endpoint response models ───────────────────────────────────────────────

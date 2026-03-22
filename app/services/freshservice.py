@@ -43,21 +43,41 @@ def _get_client() -> httpx.AsyncClient:
 
 
 # ── Internal helper ────────────────────────────────────────────────────────────
+# def _normalise_ticket(raw: dict) -> dict:
+#     """
+#     Maps raw Freshservice ticket fields to our clean internal shape.
+#     This is what gets returned to Power Automate / Copilot Studio.
+#     """
+#     return {
+#         "ticket_id":      raw.get("id"),
+#         "subject":        raw.get("subject", ""),
+#         "status":         raw.get("status", 2),
+#         "status_label":   STATUS_MAP.get(raw.get("status", 2), "Unknown"),
+#         "priority":       raw.get("priority", 2),
+#         "priority_label": PRIORITY_MAP.get(raw.get("priority", 2), "Unknown"),
+#         "created_at":     raw.get("created_at", ""),
+#         "due_by":         raw.get("due_by"),
+#         "requester_id":   raw.get("requester_id"),
+#     }
+
 def _normalise_ticket(raw: dict) -> dict:
-    """
-    Maps raw Freshservice ticket fields to our clean internal shape.
-    This is what gets returned to Power Automate / Copilot Studio.
-    """
+    requester      = raw.get("requester", {})
+    first          = requester.get("first_name", "")
+    last           = requester.get("last_name", "")
+    requester_name = requester.get("name") or f"{first} {last}".strip() or "Unknown"
+
     return {
-        "ticket_id":      raw.get("id"),
-        "subject":        raw.get("subject", ""),
-        "status":         raw.get("status", 2),
-        "status_label":   STATUS_MAP.get(raw.get("status", 2), "Unknown"),
-        "priority":       raw.get("priority", 2),
-        "priority_label": PRIORITY_MAP.get(raw.get("priority", 2), "Unknown"),
-        "created_at":     raw.get("created_at", ""),
-        "due_by":         raw.get("due_by"),
-        "requester_id":   raw.get("requester_id"),
+        "ticket_id":       raw.get("id"),
+        "subject":         raw.get("subject", ""),
+        "status":          raw.get("status", 2),
+        "status_label":    STATUS_MAP.get(raw.get("status", 2), "Unknown"),
+        "priority":        raw.get("priority", 2),
+        "priority_label":  PRIORITY_MAP.get(raw.get("priority", 2), "Unknown"),
+        "created_at":      raw.get("created_at", ""),
+        "due_by":          raw.get("due_by"),
+        "requester_id":    raw.get("requester_id"),
+        "requester_name":  requester_name,
+        "requester_email": requester.get("email", ""),
     }
 
 
@@ -98,21 +118,97 @@ async def create_ticket(data: dict) -> dict:
 
 
 # ── GET TICKET BY ID ───────────────────────────────────────────────────────────
+# async def get_ticket(ticket_id: int) -> dict:
+#     """
+#     Fetches a single ticket by its ID.
+
+#     Args:
+#         ticket_id: The Freshservice ticket number (e.g. 3)
+
+#     Returns:
+#         Normalised ticket dict
+
+#     Raises:
+#         httpx.HTTPStatusError — 404 if ticket not found
+#     """
+#     async with _get_client() as client:
+#         response = await client.get(f"/tickets/{ticket_id}")
+#         response.raise_for_status()
+#         ticket = response.json().get("ticket", {})
+#         return _normalise_ticket(ticket)
+
+
+
+# async def get_ticket(ticket_id: int) -> dict:
+#     """
+#     Fetches a single ticket by its ID, including the requester's name.
+
+#     Args:
+#         ticket_id: The Freshservice ticket number (e.g. 3)
+
+#     Returns:
+#         Normalised ticket dict with requester_name and requester_email added
+
+#     Raises:
+#         httpx.HTTPStatusError — 404 if ticket not found
+#     """
+#     async with _get_client() as client:
+#         response = await client.get(f"/tickets/{ticket_id}?include=requester")  # ← CHANGED
+#         response.raise_for_status()
+#         ticket = response.json().get("ticket", {})
+
+#         # Extract requester name from the embedded requester object
+#         requester      = ticket.get("requester", {})                                        # ← NEW
+#         requester_name = requester.get("name") or requester.get("full_name") or "Unknown"  # ← NEW
+
+#         result = _normalise_ticket(ticket)
+#         result["requester_name"]  = requester_name               # ← NEW
+#         result["requester_email"] = requester.get("email", "")   # ← NEW
+#         return result
+
+
+# async def get_ticket(ticket_id: int) -> dict:
+#     """
+#     Fetches a single ticket by its ID, including the requester's name.
+#     Uses ?include=requester to embed the requester object in one call.
+#     Falls back to a second /requesters/{id} call if name is missing.
+#     """
+#     async with _get_client() as client:
+
+#         # Step 1 — fetch ticket with requester embedded
+#         response = await client.get(f"/tickets/{ticket_id}?include=requester")
+#         response.raise_for_status()
+#         ticket = response.json().get("ticket", {})
+
+#         # Step 2 — try to get name from embedded requester object
+#         requester      = ticket.get("requester", {})
+#         requester_name = requester.get("name") or requester.get("full_name", "")
+
+#         # Step 3 — fallback: if name still empty, look up by requester_id directly
+#         if not requester_name:
+#             requester_id = ticket.get("requester_id")
+#             if requester_id:
+#                 try:
+#                     req_resp = await client.get(f"/requesters/{requester_id}")
+#                     if req_resp.is_success:
+#                         req_data       = req_resp.json().get("requester", {})
+#                         first          = req_data.get("first_name", "")
+#                         last           = req_data.get("last_name", "")
+#                         requester_name = f"{first} {last}".strip()
+#                         requester      = req_data   # also grab email from here
+#                 except Exception:
+#                     requester_name = "Unknown"
+
+#         # Step 4 — build final result
+#         result = _normalise_ticket(ticket)
+#         result["requester_name"]  = requester_name or "Unknown"
+#         result["requester_email"] = requester.get("email", "")
+#         return result
+
+
 async def get_ticket(ticket_id: int) -> dict:
-    """
-    Fetches a single ticket by its ID.
-
-    Args:
-        ticket_id: The Freshservice ticket number (e.g. 3)
-
-    Returns:
-        Normalised ticket dict
-
-    Raises:
-        httpx.HTTPStatusError — 404 if ticket not found
-    """
     async with _get_client() as client:
-        response = await client.get(f"/tickets/{ticket_id}")
+        response = await client.get(f"/tickets/{ticket_id}?include=requester")  # ← only change here
         response.raise_for_status()
         ticket = response.json().get("ticket", {})
         return _normalise_ticket(ticket)
@@ -120,59 +216,29 @@ async def get_ticket(ticket_id: int) -> dict:
 
 # ── GET TICKETS BY EMAIL ───────────────────────────────────────────────────────
 
-async def get_tickets_by_email(email: str, status: Optional[int] = 2) -> list:
-    async with _get_client() as client:
-
-        # ── STEP 1: Try requester lookup first ────────────────────
-        requester_resp = await client.get("/requesters", params={"email": email})
-        requester_resp.raise_for_status()
-        requesters = requester_resp.json().get("requesters", [])
-
-        if requesters:
-            requester_id = requesters[0]["id"]
-        else:
-            # ── STEP 1b: Not a requester — try agents endpoint ────
-            agent_resp = await client.get("/agents", params={"email": email})
-            agent_resp.raise_for_status()
-            agents = agent_resp.json().get("agents", [])
-
-            if not agents:
-                # Not a requester OR an agent — truly not found
-                return []
-
-            requester_id = agents[0]["id"]
-
-        # ── STEP 2: Filter tickets by requester_id ────────────────
-        if status is not None:
-            url = f'/tickets/filter?query="requester_id:{requester_id} AND status:{status}"&per_page=10&order_type=desc'
-        else:
-            url = f'/tickets/filter?query="requester_id:{requester_id}"&per_page=10&order_type=desc'
-
-        tickets_resp = await client.get(url)
-        tickets_resp.raise_for_status()
-
-        tickets = tickets_resp.json().get("tickets", [])
-        return [_normalise_ticket(t) for t in tickets]
-
 # async def get_tickets_by_email(email: str, status: Optional[int] = 2) -> list:
 #     async with _get_client() as client:
 
-#         # ── STEP 1: Get requester ID from email ───────────────────
-#         requester_resp = await client.get(
-#             "/requesters",
-#             params={"email": email}
-#         )
+#         # ── STEP 1: Try requester lookup first ────────────────────
+#         requester_resp = await client.get("/requesters", params={"email": email})
 #         requester_resp.raise_for_status()
-
 #         requesters = requester_resp.json().get("requesters", [])
-#         if not requesters:
-#             return []
 
-#         requester_id = requesters[0]["id"]
+#         if requesters:
+#             requester_id = requesters[0]["id"]
+#         else:
+#             # ── STEP 1b: Not a requester — try agents endpoint ────
+#             agent_resp = await client.get("/agents", params={"email": email})
+#             agent_resp.raise_for_status()
+#             agents = agent_resp.json().get("agents", [])
 
-#         # ── STEP 2: Filter tickets ─────────────────────────────────
-#         # ✅ Build URL manually — httpx must NOT encode the quotes
-#         # Freshservice filter endpoint requires literal "..." in the URL
+#             if not agents:
+#                 # Not a requester OR an agent — truly not found
+#                 return []
+
+#             requester_id = agents[0]["id"]
+
+#         # ── STEP 2: Filter tickets by requester_id ────────────────
 #         if status is not None:
 #             url = f'/tickets/filter?query="requester_id:{requester_id} AND status:{status}"&per_page=10&order_type=desc'
 #         else:
@@ -183,75 +249,65 @@ async def get_tickets_by_email(email: str, status: Optional[int] = 2) -> list:
 
 #         tickets = tickets_resp.json().get("tickets", [])
 #         return [_normalise_ticket(t) for t in tickets]
-# async def get_tickets_by_email(email: str, status: Optional[int] = 2) -> list:
-#     """
-#     Step 1: Look up the requester ID from their email address.
-#     Step 2: Use that ID to filter tickets via the filter endpoint.
-#     This two-step approach is the correct way per Freshservice API v2 docs.
-#     """
-#     async with _get_client() as client:
+    
+   
+async def get_tickets_by_email(email: str, status: Optional[int] = 2) -> list:
+    async with _get_client() as client:
 
-#         # ── STEP 1: Get requester ID from email ───────────────────
-#         requester_resp = await client.get(
-#             "/requesters",
-#             params={"email": email}
-#         )
-#         requester_resp.raise_for_status()
+        # ── STEP 1: Try requester lookup first ────────────────────
+        requester_resp = await client.get("/requesters", params={"email": email})
+        requester_resp.raise_for_status()
+        requesters = requester_resp.json().get("requesters", [])
 
-#         requesters = requester_resp.json().get("requesters", [])
-#         if not requesters:
-#             # No requester found with that email — return empty list
-#             return []
+        if requesters:
+            requester_id    = requesters[0]["id"]
+            first           = requesters[0].get("first_name", "")
+            last            = requesters[0].get("last_name", "")
+            requester_name  = f"{first} {last}".strip() or "Unknown"
+            requester_email = requesters[0].get("primary_email", "")
+        else:
+            # ── STEP 1b: Not a requester — try agents endpoint ────
+            agent_resp = await client.get("/agents", params={"email": email})
+            agent_resp.raise_for_status()
+            agents = agent_resp.json().get("agents", [])
 
-#         requester_id = requesters[0]["id"]
+            if not agents:
+                # Not a requester OR an agent — truly not found
+                return []
 
-#         # ── STEP 2: Filter tickets by requester_id ────────────────
-#         # Build the query string — status is optional
-#         if status is not None:
-#             query = f"requester_id:{requester_id} AND status:{status}"
-#         else:
-#             query = f"requester_id:{requester_id}"
+            requester_id    = agents[0]["id"]
+            first           = agents[0].get("first_name", "")
+            last            = agents[0].get("last_name", "")
+            requester_name  = f"{first} {last}".strip() or "Unknown"
+            requester_email = agents[0].get("email", "")
 
-#         tickets_resp = await client.get(
-#             "/tickets/filter",
-#             params={
-#                 "query":      query,
-#                 "per_page":   10,
-#                 "order_type": "desc",
-#             }
-#         )
-#         tickets_resp.raise_for_status()
+        # ── STEP 2: Fetch all tickets for this requester ──────────
+        params = {
+            "requester_id": requester_id,
+            "per_page":     100,
+            "order_type":   "desc",
+            "order_by":     "created_at",
+        }
 
-#         tickets = tickets_resp.json().get("tickets", [])
-#         return [_normalise_ticket(t) for t in tickets]
-      
-# async def get_tickets_by_email(email: str, status: Optional[int] = 2) -> list:
-#     """
-#     Fetches all tickets for a given requester email address.
-#     Defaults to open tickets (status=2) only.
+        tickets_resp = await client.get("/tickets", params=params)
+        tickets_resp.raise_for_status()
 
-#     Args:
-#         email:  Requester email
-#         status: Freshservice status code (2=Open, 3=Pending, 4=Resolved, 5=Closed)
-#                 Pass None to get tickets of all statuses
+        tickets = tickets_resp.json().get("tickets", [])
 
-#     Returns:
-#         List of normalised ticket dicts
-#     """
-#     params = {
-#         "email":      email,
-#         "per_page":   10,
-#         "order_type": "desc",
-#         "filter": "all",
-#     }
-#     if status is not None:
-#         params["status"] = status
+        # ── STEP 3: Filter by status in Python ────────────────────
+        # Freshservice ignores the status param on /tickets endpoint
+        # so we filter client-side instead
+        if status is not None:
+            tickets = [t for t in tickets if t.get("status") == status]
 
-#     async with _get_client() as client:
-#         response = await client.get("/tickets", params=params)
-#         response.raise_for_status()
-#         tickets = response.json().get("tickets", [])
-#         return [_normalise_ticket(t) for t in tickets]
+        # ── STEP 4: Inject requester name + email into each ticket ─
+        for t in tickets:
+            t["requester"] = {
+                "name":  requester_name,
+                "email": requester_email,
+            }
+
+        return [_normalise_ticket(t) for t in tickets]
 
 
 # ── UPDATE TICKET ──────────────────────────────────────────────────────────────
