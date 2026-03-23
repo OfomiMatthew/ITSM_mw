@@ -15,7 +15,7 @@ Endpoint summary:
 from fastapi import APIRouter, Depends, Query
 from typing import Optional
 
-from app.security import verify_api_key
+from app.security import verify_api_key, require_registered_user
 from app.models.requests import CreateTicketRequest, UpdateTicketRequest, AddNoteRequest
 from app.models.responses import (
     CreateTicketResponse,
@@ -40,7 +40,7 @@ router = APIRouter(
     summary="Create a new ticket",
     description="Called by Power Automate flow: **Create Ticket**. Raises a new incident in Freshservice.",
 )
-async def create_ticket(body: CreateTicketRequest):
+async def create_ticket(body: CreateTicketRequest, caller: dict = Depends(require_registered_user), ):
     """
     Example Power Automate HTTP action:
         Method: POST
@@ -97,6 +97,7 @@ async def get_ticket(ticket_id: int):
 async def list_tickets(
     email:  str           = Query(..., description="Requester email address"),
     status: Optional[int] = Query(None,   description="Filter by status code. 2=Open 3=Pending 4=Resolved 5=Closed. Leave blank for all."),
+    caller: dict          = Depends(require_registered_user), 
 ):
     """
     Example Power Automate HTTP action:
@@ -204,7 +205,7 @@ async def update_ticket(ticket_id: int, body: UpdateTicketRequest):
     summary="Add a note to a ticket",
     description="Called by Power Automate flow: **Add Note**.",
 )
-async def add_note(ticket_id: int, body: AddNoteRequest):
+async def add_note(ticket_id: int, body: AddNoteRequest, caller:    dict = Depends(require_registered_user), ):
     """
     Example Power Automate HTTP action:
         Method: POST
