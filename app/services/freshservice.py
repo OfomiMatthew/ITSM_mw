@@ -253,26 +253,26 @@ async def update_ticket(ticket_id: int, updates: dict) -> dict:
 
 
 # ── ADD NOTE TO TICKET ─────────────────────────────────────────────────────────
-# async def add_note(ticket_id: int, body: str, private: bool = True) -> dict:
-#     """
-#     Adds a note/comment to an existing ticket.
+async def add_note(ticket_id: int, body: str, private: bool = True) -> dict:
+    """
+    Adds a note/comment to an existing ticket.
 
-#     Args:
-#         ticket_id: The ticket to comment on
-#         body:      The note text
-#         private:   True = internal note (only agents see it)
-#                    False = public reply (requester gets notified)
+    Args:
+        ticket_id: The ticket to comment on
+        body:      The note text
+        private:   True = internal note (only agents see it)
+                   False = public reply (requester gets notified)
 
-#     Returns:
-#         Raw note response from Freshservice
-#     """
-#     async with _get_client() as client:
-#         response = await client.post(
-#             f"/tickets/{ticket_id}/notes",
-#             json={"body": body, "private": private},
-#         )
-#         response.raise_for_status()
-#         return response.json()
+    Returns:
+        Raw note response from Freshservice
+    """
+    async with _get_client() as client:
+        response = await client.post(
+            f"/tickets/{ticket_id}/notes",
+            json={"body": body, "private": private},
+        )
+        response.raise_for_status()
+        return response.json()
 
 
 
@@ -318,75 +318,79 @@ async def update_ticket(ticket_id: int, updates: dict) -> dict:
 #             "message":      f"Note added to ticket #{ticket_id} by {author_name or 'Unknown'}.",
 #         }
 
-async def add_note(
-    ticket_id:    int,
-    body:         str,
-    private:      bool = True,
-    author_name:  str  = "",
-    author_email: str  = "",
-) -> dict:
-    """
-    Adds a note to a ticket.
-    If author_email is provided, verifies the person exists
-    in Freshservice before allowing the note to be added.
-    """
-    async with _get_client() as client:
 
-        # ── Check if the author exists in Freshservice ─────────────
-        # Only runs if an email was provided
-        if author_email:
 
-            # Check requesters first
-            req_resp   = await client.get("/requesters", params={"email": author_email})
-            found_user = (
-                req_resp.is_success and
-                len(req_resp.json().get("requesters", [])) > 0
-            )
 
-            # If not a requester, check agents
-            if not found_user:
-                agent_resp = await client.get("/agents", params={"email": author_email})
-                found_user = (
-                    agent_resp.is_success and
-                    len(agent_resp.json().get("agents", [])) > 0
-                )
+# async def add_note(
+#     ticket_id:    int,
+#     body:         str,
+#     private:      bool = True,
+#     author_name:  str  = "",
+#     author_email: str  = "",
+# ) -> dict:
+#     """
+#     Adds a note to a ticket.
+#     If author_email is provided, verifies the person exists
+#     in Freshservice before allowing the note to be added.
+#     """
+#     async with _get_client() as client:
 
-            # If not found anywhere — block the note
-            if not found_user:
-                raise ValueError(
-                    f"User '{author_email}' does not exist in Freshservice. "
-                    f"Only registered users and agents can add notes to tickets."
-                )
+#         # ── Check if the author exists in Freshservice ─────────────
+#         # Only runs if an email was provided
+#         if author_email:
 
-        # ── Format the note body with author attribution ────────────
-        if author_name:
-            formatted_body = (
-                f"📝 Note added by: {author_name}"
-                + (f" ({author_email})" if author_email else "")
-                + f"\n{'─' * 40}\n"
-                + body
-            )
-        else:
-            formatted_body = body
+#             # Check requesters first
+#             req_resp   = await client.get("/requesters", params={"email": author_email})
+#             found_user = (
+#                 req_resp.is_success and
+#                 len(req_resp.json().get("requesters", [])) > 0
+#             )
 
-        # ── Post the note to Freshservice ───────────────────────────
-        response = await client.post(
-            f"/tickets/{ticket_id}/notes",
-            json={
-                "body":    formatted_body,
-                "private": private,
-            },
-        )
-        response.raise_for_status()
+#             # If not a requester, check agents
+#             if not found_user:
+#                 agent_resp = await client.get("/agents", params={"email": author_email})
+#                 found_user = (
+#                     agent_resp.is_success and
+#                     len(agent_resp.json().get("agents", [])) > 0
+#                 )
 
-        return {
-            "ticket_id":    ticket_id,
-            "note_body":    formatted_body,
-            "private":      private,
-            "author_name":  author_name  or "Unknown",
-            "author_email": author_email or "",
-            "message":      f"Note added to ticket #{ticket_id} by {author_name or 'Unknown'}.",
-        }
+#             # If not found anywhere — block the note
+#             if not found_user:
+#                 raise ValueError(
+#                     f"User '{author_email}' does not exist in Freshservice. "
+#                     f"Only registered users and agents can add notes to tickets."
+#                 )
+
+#         # ── Format the note body with author attribution ────────────
+#         if author_name:
+#             formatted_body = (
+#                 f"📝 Note added by: {author_name}"
+#                 + (f" ({author_email})" if author_email else "")
+#                 + f"\n{'─' * 40}\n"
+#                 + body
+#             )
+#         else:
+#             formatted_body = body
+
+#         # ── Post the note to Freshservice ───────────────────────────
+#         response = await client.post(
+#             f"/tickets/{ticket_id}/notes",
+#             json={
+#                 "body":    formatted_body,
+#                 "private": private,
+#             },
+#         )
+#         response.raise_for_status()
+
+#         return {
+#             "ticket_id":    ticket_id,
+#             "note_body":    formatted_body,
+#             "private":      private,
+#             "author_name":  author_name  or "Unknown",
+#             "author_email": author_email or "",
+#             "message":      f"Note added to ticket #{ticket_id} by {author_name or 'Unknown'}.",
+#         }
+
 
 
 
