@@ -509,7 +509,7 @@ async def update_ticket(
     ),
     dependencies=[Depends(verify_api_key)],
 )
-async def get_weekly_report(caller: dict = Depends(require_manager), ):
+async def get_weekly_report(caller: dict = Depends(require_agent_or_manager), ):
     try:
         result = await ms.get_weekly_report()
         return {"success": True, **result}
