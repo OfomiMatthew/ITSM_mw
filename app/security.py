@@ -139,58 +139,58 @@ async def require_manager(
 
 
 # ── Layer 3: Ownership verification ────────────────────────────────────────────
-async def verify_ticket_ownership(
-    ticket_id: int,
-    email:     str = Query(..., description="Caller's email address"),
-    api_key:   str = Security(api_key_header),
-    settings:  Settings = Depends(get_settings),
-) -> dict:
-    """
-    Dependency — verifies:
-      1. Valid x-api-key
-      2. If caller is a REQUESTER, they can only access THEIR tickets
-      3. If caller is an AGENT/MANAGER, they can access ANY ticket
+# async def verify_ticket_ownership(
+#     ticket_id: int,
+#     email:     str = Query(..., description="Caller's email address"),
+#     api_key:   str = Security(api_key_header),
+#     settings:  Settings = Depends(get_settings),
+# ) -> dict:
+#     """
+#     Dependency — verifies:
+#       1. Valid x-api-key
+#       2. If caller is a REQUESTER, they can only access THEIR tickets
+#       3. If caller is an AGENT/MANAGER, they can access ANY ticket
     
-    Returns the caller's role data.
-    Raises 403 if requester tries to access someone else's ticket.
-    """
-    if not api_key or api_key != settings.middleware_api_key:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Invalid API key.",
-        )
+#     Returns the caller's role data.
+#     Raises 403 if requester tries to access someone else's ticket.
+#     """
+#     if not api_key or api_key != settings.middleware_api_key:
+#         raise HTTPException(
+#             status_code=status.HTTP_403_FORBIDDEN,
+#             detail="Invalid API key.",
+#         )
     
-    # Get caller's role
-    role_data = await _get_role(email, api_key, settings)
+#     # Get caller's role
+#     role_data = await _get_role(email, api_key, settings)
     
-    # Agents and managers can access any ticket
-    if role_data.get("is_agent") or role_data.get("is_manager"):
-        return role_data
+#     # Agents and managers can access any ticket
+#     if role_data.get("is_agent") or role_data.get("is_manager"):
+#         return role_data
     
-    # Requesters can only access their own tickets
-    if role_data.get("is_requester"):
-        import app.services.freshservice as fs
-        try:
-            ticket = await fs.get_ticket(ticket_id)
-            ticket_email = ticket.get("requester_email", "").lower()
-            caller_email = email.lower()
+#     # Requesters can only access their own tickets
+#     if role_data.get("is_requester"):
+#         import app.services.freshservice as fs
+#         try:
+#             ticket = await fs.get_ticket(ticket_id)
+#             ticket_email = ticket.get("requester_email", "").lower()
+#             caller_email = email.lower()
             
-            if ticket_email != caller_email:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail=f"Access denied. You can only view your own tickets. This ticket belongs to someone else.",
-                )
-            return role_data
-        except HTTPException:
-            raise
-        except Exception as e:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Could not verify ticket ownership: {str(e)}",
-            )
+#             if ticket_email != caller_email:
+#                 raise HTTPException(
+#                     status_code=status.HTTP_403_FORBIDDEN,
+#                     detail=f"Access denied. You can only view your own tickets. This ticket belongs to someone else.",
+#                 )
+#             return role_data
+#         except HTTPException:
+#             raise
+#         except Exception as e:
+#             raise HTTPException(
+#                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+#                 detail=f"Could not verify ticket ownership: {str(e)}",
+#             )
     
-    # Unknown role
-    raise HTTPException(
-        status_code=status.HTTP_403_FORBIDDEN,
-        detail="You are not authorized to access tickets.",
-    )
+#     # Unknown role
+#     raise HTTPException(
+#         status_code=status.HTTP_403_FORBIDDEN,
+#         detail="You are not authorized to access tickets.",
+#     )

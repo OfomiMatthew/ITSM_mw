@@ -15,7 +15,7 @@ Endpoint summary:
 from fastapi import APIRouter, Depends, Query, HTTPException, Header, status
 from typing import Optional
 
-from app.security import verify_api_key, require_registered_user,verify_ticket_ownership
+from app.security import verify_api_key
 from app.models.requests import CreateTicketRequest, UpdateTicketRequest, AddNoteRequest
 from app.models.responses import (
     CreateTicketResponse,
@@ -44,7 +44,8 @@ router = APIRouter(
     summary="Create a new ticket",
     description="Called by Power Automate flow: **Create Ticket**. Raises a new incident in Freshservice.",
 )
-async def create_ticket(body: CreateTicketRequest, caller: dict = Depends(require_registered_user), ):
+async def create_ticket(body: CreateTicketRequest):
+# async def create_ticket(body: CreateTicketRequest, caller: dict = Depends(require_registered_user), ):
     """
     Example Power Automate HTTP action:
         Method: POST
@@ -84,10 +85,7 @@ async def create_ticket(body: CreateTicketRequest, caller: dict = Depends(requir
     summary="Get a ticket by ID",
     description="Called by Power Automate flow: **Get Ticket Status**.",
 )
-async def get_ticket(
-    ticket_id: int, 
-    caller: dict = Depends(verify_ticket_ownership)
-):
+async def get_ticket(ticket_id: int):
     """
     Example Power Automate HTTP action:
         Method: GET
@@ -110,51 +108,6 @@ async def get_ticket(
 
 
 # ── GET /tickets?email=... ─────────────────────────────────────────────────────
-# @router.get(
-#     "/",
-#     response_model=TicketListResponse,
-#     summary="List open tickets for a user",
-#     description="Called by Power Automate flow: **Get My Open Tickets**.",
-# )
-# async def list_tickets(
-#     email:  str           = Query(..., description="Requester email address"),
-#     status: Optional[int] = Query(None,   description="Filter by status code. 2=Open 3=Pending 4=Resolved 5=Closed. Leave blank for all."),
-#     caller: dict          = Depends(require_registered_user), 
-# ):
-#     """
-#     Example Power Automate HTTP action:
-#         Method: GET
-#         URI:    https://your-app.azurewebsites.net/tickets?email=@{triggerBody()?['email']}
-#         Header: x-api-key = <your middleware key>
-#     """
-#     try:
-#         tickets = await fs.get_tickets_by_email(email, status)
-
-#         # Build a pre-formatted summary string Copilot Studio can display directly
-#         if not tickets:
-#             summary = "You have no open tickets at the moment. 🎉"
-#         else:
-#             lines = [
-#                 f"#{t['ticket_id']}: {t['subject']} | {t['status_label']} | {t['priority_label']}"
-#                 for t in tickets
-#             ]
-#             summary = "\n".join(lines)
-
-#         return TicketListResponse(
-#             success=True,
-#             ticket_count=len(tickets),
-#             tickets=tickets,
-#             summary=summary,
-#         )
-#     except Exception as e:
-#         return TicketListResponse(
-#             success=False,
-#             ticket_count=0,
-#             tickets=[],
-#             summary=f"Error fetching tickets: {str(e)}",
-#         )
-
-
 @router.get(
     "/",
     response_model=TicketListResponse,
@@ -163,8 +116,8 @@ async def get_ticket(
 )
 async def list_tickets(
     email:  str           = Query(..., description="Requester email address"),
-    status: Optional[int] = Query(None, description="Filter by status code. 2=Open 3=Pending 4=Resolved 5=Closed. Leave blank for all."),
-    caller: dict          = Depends(require_registered_user), 
+    status: Optional[int] = Query(None,   description="Filter by status code. 2=Open 3=Pending 4=Resolved 5=Closed. Leave blank for all."),
+    # caller: dict          = Depends(require_registered_user), 
 ):
     """
     Example Power Automate HTTP action:
@@ -172,22 +125,6 @@ async def list_tickets(
         URI:    https://your-app.azurewebsites.net/tickets?email=@{triggerBody()?['email']}
         Header: x-api-key = <your middleware key>
     """
-    
-    # ── SECURITY CHECK: Requesters can only query their own email ────────────
-    caller_email = caller.get("email", "").lower()
-    query_email  = email.lower()
-    
-    # If caller is a requester (not agent/manager), they can ONLY query their own tickets
-    if caller.get("is_requester") and not (caller.get("is_agent") or caller.get("is_manager")):
-        if caller_email != query_email:
-            return TicketListResponse(
-                success=False,
-                ticket_count=0,
-                tickets=[],
-                summary=f"Access denied. You can only view your own tickets.",
-            )
-    
-    # ── Proceed with query ────────────────────────────────────────────────────
     try:
         tickets = await fs.get_tickets_by_email(email, status)
 
@@ -216,55 +153,77 @@ async def list_tickets(
         )
 
 
+# @router.get(
+#     "/",
+#     response_model=TicketListResponse,
+#     summary="List open tickets for a user",
+#     description="Called by Power Automate flow: **Get My Open Tickets**.",
+# )
+# async def list_tickets(
+#     email:  str           = Query(..., description="Requester email address"),
+#     status: Optional[int] = Query(None, description="Filter by status code. 2=Open 3=Pending 4=Resolved 5=Closed. Leave blank for all."),
+#     caller: dict          = Depends(require_registered_user), 
+# ):
+#     """
+#     Example Power Automate HTTP action:
+#         Method: GET
+#         URI:    https://your-app.azurewebsites.net/tickets?email=@{triggerBody()?['email']}
+#         Header: x-api-key = <your middleware key>
+#     """
+    
+#     # ── SECURITY CHECK: Requesters can only query their own email ────────────
+#     caller_email = caller.get("email", "").lower()
+#     query_email  = email.lower()
+    
+#     # If caller is a requester (not agent/manager), they can ONLY query their own tickets
+#     if caller.get("is_requester") and not (caller.get("is_agent") or caller.get("is_manager")):
+#         if caller_email != query_email:
+#             return TicketListResponse(
+#                 success=False,
+#                 ticket_count=0,
+#                 tickets=[],
+#                 summary=f"Access denied. You can only view your own tickets.",
+#             )
+    
+#     # ── Proceed with query ────────────────────────────────────────────────────
+#     try:
+#         tickets = await fs.get_tickets_by_email(email, status)
+
+#         # Build a pre-formatted summary string Copilot Studio can display directly
+#         if not tickets:
+#             summary = "You have no open tickets at the moment. 🎉"
+#         else:
+#             lines = [
+#                 f"#{t['ticket_id']}: {t['subject']} | {t['status_label']} | {t['priority_label']}"
+#                 for t in tickets
+#             ]
+#             summary = "\n".join(lines)
+
+#         return TicketListResponse(
+#             success=True,
+#             ticket_count=len(tickets),
+#             tickets=tickets,
+#             summary=summary,
+#         )
+#     except Exception as e:
+#         return TicketListResponse(
+#             success=False,
+#             ticket_count=0,
+#             tickets=[],
+#             summary=f"Error fetching tickets: {str(e)}",
+#         )
+
+
 
 
 # ── PUT /tickets/{ticket_id} ───────────────────────────────────────────────────
-# @router.put(
-#     "/{ticket_id}",
-#     response_model=GenericResponse,
-#     summary="Update a ticket",
-#     description="Called by Power Automate flow: **Update Ticket**. Change priority or status.",
-# )
-# async def update_ticket(ticket_id: int, body: UpdateTicketRequest):
-#     """
-#     Example Power Automate HTTP action:
-#         Method: PUT
-#         URI:    https://your-app.azurewebsites.net/tickets/@{variables('ticketId')}
-#         Header: x-api-key = <your middleware key>
-#         Body:   { "priority": 3 }
-#     """
-#     try:
-#         updates = body.model_dump(exclude_none=True)
-
-#         if not updates:
-#             return GenericResponse(
-#                 success=False,
-#                 message="No fields provided to update.",
-#             )
-
-#         await fs.update_ticket(ticket_id, updates)
-#         return GenericResponse(
-#             success=True,
-#             message=f"Ticket #{ticket_id} updated successfully.",
-#         )
-#     except Exception as e:
-#         return GenericResponse(
-#             success=False,
-#             message=f"Failed to update ticket #{ticket_id}: {str(e)}",
-#         )
-
-
 @router.put(
     "/{ticket_id}",
     response_model=GenericResponse,
     summary="Update a ticket",
     description="Called by Power Automate flow: **Update Ticket**. Change priority or status.",
 )
-async def update_ticket(
-    ticket_id: int, 
-    body: UpdateTicketRequest,
-    caller: dict = Depends(verify_ticket_ownership)
-):
+async def update_ticket(ticket_id: int, body: UpdateTicketRequest):
     """
     Example Power Automate HTTP action:
         Method: PUT
@@ -280,17 +239,6 @@ async def update_ticket(
                 success=False,
                 message="No fields provided to update.",
             )
-        
-        # ── SECURITY CHECK: Requesters cannot resolve/close tickets ──────────
-        if caller.get("is_requester") and not (caller.get("is_agent") or caller.get("is_manager")):
-            if "status" in updates:
-                status_value = updates["status"]
-                # Status 4=Resolved, 5=Closed — only agents can set these
-                if status_value in [4, 5]:
-                    return GenericResponse(
-                        success=False,
-                        message="Access denied. Only IT agents can resolve or close tickets.",
-                    )
 
         await fs.update_ticket(ticket_id, updates)
         return GenericResponse(
@@ -302,6 +250,56 @@ async def update_ticket(
             success=False,
             message=f"Failed to update ticket #{ticket_id}: {str(e)}",
         )
+
+
+# @router.put(
+#     "/{ticket_id}",
+#     response_model=GenericResponse,
+#     summary="Update a ticket",
+#     description="Called by Power Automate flow: **Update Ticket**. Change priority or status.",
+# )
+# async def update_ticket(
+#     ticket_id: int, 
+#     body: UpdateTicketRequest,
+#     caller: dict = Depends(verify_ticket_ownership)
+# ):
+#     """
+#     Example Power Automate HTTP action:
+#         Method: PUT
+#         URI:    https://your-app.azurewebsites.net/tickets/@{variables('ticketId')}
+#         Header: x-api-key = <your middleware key>
+#         Body:   { "priority": 3 }
+#     """
+#     try:
+#         updates = body.model_dump(exclude_none=True)
+
+#         if not updates:
+#             return GenericResponse(
+#                 success=False,
+#                 message="No fields provided to update.",
+#             )
+        
+#         # ── SECURITY CHECK: Requesters cannot resolve/close tickets ──────────
+#         if caller.get("is_requester") and not (caller.get("is_agent") or caller.get("is_manager")):
+#             if "status" in updates:
+#                 status_value = updates["status"]
+#                 # Status 4=Resolved, 5=Closed — only agents can set these
+#                 if status_value in [4, 5]:
+#                     return GenericResponse(
+#                         success=False,
+#                         message="Access denied. Only IT agents can resolve or close tickets.",
+#                     )
+
+#         await fs.update_ticket(ticket_id, updates)
+#         return GenericResponse(
+#             success=True,
+#             message=f"Ticket #{ticket_id} updated successfully.",
+#         )
+#     except Exception as e:
+#         return GenericResponse(
+#             success=False,
+#             message=f"Failed to update ticket #{ticket_id}: {str(e)}",
+#         )
 
 
 
@@ -342,7 +340,7 @@ async def update_ticket(
     summary="Add a note to a ticket",
     description="Called by Power Automate flow: **Add Note**.",
 )
-async def add_note(ticket_id: int, body: AddNoteRequest, caller:    dict = Depends(require_registered_user), ):
+async def add_note(ticket_id: int, body: AddNoteRequest,):
     """
     Example Power Automate HTTP action:
         Method: POST

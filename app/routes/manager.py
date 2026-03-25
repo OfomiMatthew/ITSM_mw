@@ -20,7 +20,7 @@ Endpoint summary:
 from fastapi import APIRouter, Depends, Query
 from typing import Optional
 
-from app.security import verify_api_key,require_agent_or_manager,require_manager
+from app.security import verify_api_key
 from app.models.manager import (
     UserRoleResponse,
     TeamTicketsResponse,
@@ -110,7 +110,7 @@ async def get_team_tickets(
     status:   Optional[int] = Query(None, description="Filter by status. 2=Open 3=Pending 4=Resolved 5=Closed"),
     priority: Optional[int] = Query(None, description="Filter by priority. 1=Low 2=Medium 3=High 4=Urgent"),
     per_page: int            = Query(20,   description="How many tickets to return. Max 30."),
-    caller:   dict           = Depends(require_agent_or_manager),
+    # caller:   dict           = Depends(require_agent_or_manager),
 ):
     """
     Power Automate HTTP action:
@@ -164,7 +164,7 @@ async def get_team_tickets(
         "high priority, and urgent. Perfect for a daily standup report."
     ),
 )
-async def get_analytics( caller: dict = Depends(require_agent_or_manager), ):
+async def get_analytics():
     """
     Power Automate HTTP action:
         Method: GET
@@ -214,7 +214,7 @@ async def get_analytics( caller: dict = Depends(require_agent_or_manager), ):
         "This is the most proactive and powerful manager feature."
     ),
 )
-async def get_sla_breaches(caller: dict = Depends(require_agent_or_manager),):
+async def get_sla_breaches():
     """
     Power Automate HTTP action:
         Method: GET
@@ -386,7 +386,7 @@ async def search_knowledge_base(
 async def assign_ticket(
     ticket_id:   int,
     agent_email: str = Query(..., description="Email of the agent to assign the ticket to"),
-    caller:      dict = Depends(require_agent_or_manager),
+    #caller:      dict = Depends(require_agent_or_manager),
 ):
     """
     Power Automate HTTP action:
@@ -509,7 +509,7 @@ async def update_ticket(
     ),
     dependencies=[Depends(verify_api_key)],
 )
-async def get_weekly_report(caller: dict = Depends(require_agent_or_manager), ):
+async def get_weekly_report():
     try:
         result = await ms.get_weekly_report()
         return {"success": True, **result}
