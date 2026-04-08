@@ -571,50 +571,251 @@ async def assign_ticket(ticket_id: int, agent_email: str) -> dict:
 # ══════════════════════════════════════════════════════════════════════════════
 # RESOLVE TICKET
 # ══════════════════════════════════════════════════════════════════════════════
+# async def resolve_ticket(
+#     ticket_id:       int,
+#     resolution_note: str,
+# ) -> dict:
+#     """
+#     Resolves a ticket and adds a resolution note in one step.
+
+#     Only agents and managers can resolve tickets.
+#     The requester gets an email notification automatically
+#     because the resolution note is public.
+
+#     Does two things in sequence:
+#       1. Adds a public note describing what fixed the issue
+#       2. Changes the ticket status to Resolved (4)
+#     """
+#     async with _get_client() as client:
+
+#         # Step 1: Add a public resolution note
+#         await client.post(
+#             f"/tickets/{ticket_id}/notes",
+#             json={
+#                 "body":    f"✅ RESOLVED — {resolution_note}",
+#                 "private": False,
+#             }
+#         )
+
+#         # Step 2: Set status to Resolved (4)
+#         # Accept 400 too — Freshservice sometimes returns 400
+#         # even when the change succeeds (already resolved case)
+#         status_resp = await client.put(
+#             f"/tickets/{ticket_id}",
+#             json={"status": 4}
+#         )
+
+#         if status_resp.status_code in [200, 201, 204, 400]:
+#             return {
+#                 "ticket_id": ticket_id,
+#                 "resolved":  True,
+#             }
+
+#         status_resp.raise_for_status()
+#         return {
+#             "ticket_id": ticket_id,
+#             "resolved":  True,
+#         }
+
+def _fs_error(resp) -> str:
+    try:
+        body   = resp.json()
+        errors = body.get("errors", [])
+        if errors:
+            return " | ".join(
+                f"{e.get('field','')}: {e.get('message','')}" for e in errors
+            ).strip(" |")
+        return (
+            body.get("message") or
+            body.get("description") or
+            f"HTTP {resp.status_code}"
+        )
+    except Exception:
+        return f"HTTP {resp.status_code}"
+
+
+
+# async def resolve_ticket(
+#     ticket_id:       int,
+#     resolution_note: str,
+# ) -> dict:
+#     async with _get_client() as client:
+
+#         # Fetch ticket first — check status and assignment
+#         ticket_resp = await client.get(f"/tickets/{ticket_id}?include=requester")
+#         if not ticket_resp.is_success:
+#             raise ValueError(f"Ticket #{ticket_id} not found. ({_fs_error(ticket_resp)})")
+
+#         ticket         = ticket_resp.json().get("ticket", {})
+#         current_status = ticket.get("status", 2)
+#         responder_id   = ticket.get("responder_id")
+
+#         # Already resolved or closed — nothing to do
+#         if current_status in [4, 5]:
+#             label = "Resolved" if current_status == 4 else "Closed"
+#             return {
+#                 "ticket_id": ticket_id,
+#                 "status":    current_status,
+#                 "message":   f"Ticket #{ticket_id} is already {label}. No changes made.",
+#             }
+
+#         # Block if no agent assigned — Freshservice rejects resolve on unassigned tickets
+#         if not responder_id:
+#             raise ValueError(
+#                 f"Ticket #{ticket_id} cannot be resolved — no agent assigned. "
+#                 "Use the Assign Ticket endpoint first, then resolve."
+#             )
+
+#         # Change status to Resolved (4)
+#         status_resp = await client.put(f"/tickets/{ticket_id}", json={"status": 4})
+#         if not status_resp.is_success:
+#             raise ValueError(f"Freshservice rejected resolve for ticket #{ticket_id}: {_fs_error(status_resp)}")
+
+#         # Add public note — only after status change confirmed
+#         await client.post(
+#             f"/tickets/{ticket_id}/notes",
+#             json={"body": f"✅ Resolved — {resolution_note}", "private": False}
+#         )
+
+#         return {
+#             "ticket_id": ticket_id,
+#             "status":    4,
+#             "message":   f"Ticket #{ticket_id} has been marked as Resolved.",
+#         }
+
+
+# async def resolve_ticket(
+#     ticket_id:       int,
+#     resolution_note: str,
+# ) -> dict:
+#     async with _get_client() as client:
+
+#         # Fetch ticket — check current status and assignment
+#         ticket_resp = await client.get(f"/tickets/{ticket_id}?include=requester")
+#         if not ticket_resp.is_success:
+#             raise ValueError(f"Ticket #{ticket_id} not found. ({_fs_error(ticket_resp)})")
+
+#         ticket         = ticket_resp.json().get("ticket", {})
+#         current_status = ticket.get("status", 2)
+#         responder_id   = ticket.get("responder_id")
+
+#         # Already resolved or closed — nothing to do
+#         if current_status in [4, 5]:
+#             label = "Resolved" if current_status == 4 else "Closed"
+#             return {
+#                 "ticket_id": ticket_id,
+#                 "status":    current_status,
+#                 "message":   f"Ticket #{ticket_id} is already {label}. No changes made.",
+#             }
+
+#         # Freshservice blocks resolution if no agent is assigned
+#         if not responder_id:
+#             raise ValueError(
+#                 f"Ticket #{ticket_id} cannot be resolved — no agent is assigned. "
+#                 "Use the Assign Ticket endpoint first, then resolve."
+#             )
+
+#         # ── THE KEY FIX ───────────────────────────────────────────────────────
+#         # Pass resolution_notes IN THE SAME payload as the status change.
+#         # This fills the Resolution field inside Freshservice directly.
+#         # Posting to /notes is a conversation note — a completely different thing.
+#         # Freshservice requires the Resolution field to be filled before it
+#         # will accept a status change to Resolved (4).
+#         # ─────────────────────────────────────────────────────────────────────
+#         status_resp = await client.put(
+#             f"/tickets/{ticket_id}",
+#             json={
+#                 "status":           4,
+#                 "resolution_notes": resolution_note,   # ← fills the Resolution section
+#             }
+#         )
+#         if not status_resp.is_success:
+#             raise ValueError(
+#                 f"Freshservice rejected the resolve for ticket #{ticket_id}: "
+#                 f"{_fs_error(status_resp)}"
+#             )
+
+#         return {
+#             "ticket_id": ticket_id,
+#             "status":    4,
+#             "message":   f"Ticket #{ticket_id} has been marked as Resolved.",
+#         }
+
+
 async def resolve_ticket(
     ticket_id:       int,
     resolution_note: str,
 ) -> dict:
-    """
-    Resolves a ticket and adds a resolution note in one step.
-
-    Only agents and managers can resolve tickets.
-    The requester gets an email notification automatically
-    because the resolution note is public.
-
-    Does two things in sequence:
-      1. Adds a public note describing what fixed the issue
-      2. Changes the ticket status to Resolved (4)
-    """
     async with _get_client() as client:
 
-        # Step 1: Add a public resolution note
-        await client.post(
-            f"/tickets/{ticket_id}/notes",
-            json={
-                "body":    f"✅ RESOLVED — {resolution_note}",
-                "private": False,
-            }
-        )
+        # Fetch ticket — check status, assignment and get agent id
+        ticket_resp = await client.get(f"/tickets/{ticket_id}?include=requester")
+        if not ticket_resp.is_success:
+            raise ValueError(f"Ticket #{ticket_id} not found. ({_fs_error(ticket_resp)})")
 
-        # Step 2: Set status to Resolved (4)
-        # Accept 400 too — Freshservice sometimes returns 400
-        # even when the change succeeds (already resolved case)
-        status_resp = await client.put(
-            f"/tickets/{ticket_id}",
-            json={"status": 4}
-        )
+        ticket         = ticket_resp.json().get("ticket", {})
+        current_status = ticket.get("status", 2)
+        responder_id   = ticket.get("responder_id")
 
-        if status_resp.status_code in [200, 201, 204, 400]:
+        # Already resolved or closed — nothing to do
+        if current_status in [4, 5]:
+            label = "Resolved" if current_status == 4 else "Closed"
             return {
                 "ticket_id": ticket_id,
-                "resolved":  True,
+                "status":    current_status,
+                "message":   f"Ticket #{ticket_id} is already {label}. No changes made.",
             }
 
-        status_resp.raise_for_status()
+        # Block if no agent assigned
+        if not responder_id:
+            raise ValueError(
+                f"Ticket #{ticket_id} cannot be resolved — no agent is assigned. "
+                "Use the Assign Ticket endpoint first, then resolve."
+            )
+
+        # ── Look up the assigned agent's name ─────────────────────────────────
+        # Freshservice always records API actions under the API key owner.
+        # To show the correct agent name, we look up the assigned agent
+        # and prefix their name into the resolution_notes field directly.
+        agent_name = "IT Agent"   # fallback if lookup fails
+        try:
+            agent_resp = await client.get(f"/agents/{responder_id}")
+            if agent_resp.is_success:
+                agent      = agent_resp.json().get("agent", {})
+                first      = agent.get("first_name", "")
+                last       = agent.get("last_name", "")
+                agent_name = f"{first} {last}".strip() or "IT Agent"
+        except Exception:
+            pass   # non-fatal — we still proceed with resolution
+
+        # Build the resolution note attributed to the assigned agent
+        attributed_note = (
+            f"Resolved by: {agent_name}\n"
+            f"{'─' * 40}\n"
+            f"{resolution_note}"
+        )
+
+        # ── Change status to Resolved (4) with resolution_notes in same payload
+        # resolution_notes fills the Resolution section in Freshservice —
+        # this is what was blocking resolution before, not /notes endpoint
+        status_resp = await client.put(
+            f"/tickets/{ticket_id}",
+            json={
+                "status":           4,
+                "resolution_notes": attributed_note,
+            }
+        )
+        if not status_resp.is_success:
+            raise ValueError(
+                f"Freshservice rejected the resolve for ticket #{ticket_id}: "
+                f"{_fs_error(status_resp)}"
+            )
+
         return {
-            "ticket_id": ticket_id,
-            "resolved":  True,
+            "ticket_id":   ticket_id,
+            "status":      4,
+            "resolved_by": agent_name,
+            "message":     f"Ticket #{ticket_id} has been marked as Resolved by {agent_name}.",
         }
         
         
@@ -904,47 +1105,234 @@ async def get_unassigned_tickets() -> dict:
 # 8. CLOSE TICKET
 # ══════════════════════════════════════════════════════════════════════════════
 
+# async def close_ticket(ticket_id: int, closing_note: str) -> dict:
+#     """
+#     Permanently closes a ticket.
+#     Freshservice requires two steps — resolve first (4), then close (5).
+#     Jumping straight to Closed from Open/Pending causes a 400 error.
+#     """
+#     async with _get_client() as client:
+
+#         # Step 1 — add private closing note
+#         await client.post(
+#             f"/tickets/{ticket_id}/notes",
+#             json={
+#                 "body":    closing_note,
+#                 "private": True,
+#             }
+#         )
+
+#         # Step 2 — set to Resolved (4) first
+#         # Freshservice rejects a direct jump to Closed (5) from Open/Pending
+#         resolve_resp = await client.put(
+#             f"/tickets/{ticket_id}",
+#             json={"status": 4}
+#         )
+#         # Accept 400 here — Freshservice sometimes returns 400 even on success
+#         # for status transitions (known Freshservice quirk)
+#         if resolve_resp.status_code not in [200, 201, 400]:
+#             resolve_resp.raise_for_status()
+
+#         # Step 3 — now set to Closed (5)
+#         close_resp = await client.put(
+#             f"/tickets/{ticket_id}",
+#             json={"status": 5}
+#         )
+#         if close_resp.status_code not in [200, 201, 400]:
+#             close_resp.raise_for_status()
+
+#         return {
+#             "ticket_id": ticket_id,
+#             "status":    5,
+#             "message":   f"Ticket #{ticket_id} has been permanently closed.",
+#         }
+
+
+# async def close_ticket(ticket_id: int, closing_note: str) -> dict:
+#     """
+#     Permanently closes a ticket.
+
+#     Freshservice status transition rules:
+#       - You CANNOT jump directly from Open (2) or Pending (3) to Closed (5).
+#         Freshservice will reject this with a 400 error.
+#       - The required path is always: Open/Pending → Resolved (4) → Closed (5).
+#       - If the ticket is already Resolved (4), we skip straight to Closed (5).
+
+#     Order of operations:
+#       1. Fetch the ticket to check its current status.
+#       2. If Open (2) or Pending (3): change to Resolved (4) first.
+#       3. Change to Closed (5).
+#       4. Add a private closing note AFTER status is confirmed changed.
+
+#     Why status changes before the note?
+#       The old code added the note first. If the status transitions then failed
+#       with a 400, the code treated that as success — note visible, status
+#       unchanged. Now status changes are confirmed before the note is added.
+#     """
+#     async with _get_client() as client:
+
+#         # Step 1: Fetch the ticket to check current status
+#         ticket_resp = await client.get(f"/tickets/{ticket_id}")
+#         ticket_resp.raise_for_status()
+#         current_status = ticket_resp.json().get("ticket", {}).get("status", 2)
+
+#         # Step 2: If ticket is Open (2) or Pending (3), must go through Resolved (4)
+#         # Freshservice does not allow jumping directly to Closed from these states
+#         if current_status in [2, 3]:
+#             resolve_resp = await client.put(
+#                 f"/tickets/{ticket_id}",
+#                 json={"status": 4}
+#             )
+#             resolve_resp.raise_for_status()  # Surface real error, do not accept 400
+
+#         # Step 3: Set to Closed (5)
+#         # This works whether we just set it to 4 above, or it was already at 4
+#         close_resp = await client.put(
+#             f"/tickets/{ticket_id}",
+#             json={"status": 5}
+#         )
+#         close_resp.raise_for_status()  # Surface real error, do not accept 400
+
+#         # Step 4: Add private closing note — only runs if both status changes succeeded
+#         await client.post(
+#             f"/tickets/{ticket_id}/notes",
+#             json={
+#                 "body":    closing_note,
+#                 "private": True,
+#             }
+#         )
+
+#         return {
+#             "ticket_id": ticket_id,
+#             "status":    5,
+#             "message":   f"Ticket #{ticket_id} has been permanently closed.",
+#         }
+
+
+# async def close_ticket(ticket_id: int, closing_note: str) -> dict:
+#     async with _get_client() as client:
+
+#         # Fetch ticket first — check status and assignment
+#         ticket_resp = await client.get(f"/tickets/{ticket_id}")
+#         if not ticket_resp.is_success:
+#             raise ValueError(f"Ticket #{ticket_id} not found. ({_fs_error(ticket_resp)})")
+
+#         ticket         = ticket_resp.json().get("ticket", {})
+#         current_status = ticket.get("status", 2)
+#         responder_id   = ticket.get("responder_id")
+
+#         # Already closed — nothing to do
+#         if current_status == 5:
+#             return {
+#                 "ticket_id": ticket_id,
+#                 "status":    5,
+#                 "message":   f"Ticket #{ticket_id} is already Closed. No changes made.",
+#             }
+
+#         # Block if no agent assigned
+#         if not responder_id:
+#             raise ValueError(
+#                 f"Ticket #{ticket_id} cannot be closed — no agent assigned. "
+#                 "Assign it to an agent first."
+#             )
+
+#         # Must go through Resolved (4) before Closed (5)
+#         # if current_status in [2, 3]:
+#         #     resolve_resp = await client.put(f"/tickets/{ticket_id}", json={"status": 4})
+#         #     if not resolve_resp.is_success:
+#         #         raise ValueError(f"Could not transition to Resolved first: {_fs_error(resolve_resp)}")
+        
+#         # Must go through Resolved (4) before Closed (5)
+# # Include resolution_notes here too — same requirement applies
+#         if current_status in [2, 3]:
+#             resolve_resp = await client.put(
+#             f"/tickets/{ticket_id}",
+#             json={
+#             "status":           4,
+#             "resolution_notes": closing_note,   # ← satisfies Freshservice Resolution field
+#                 }
+#             )
+#             if not resolve_resp.is_success:
+#                 raise ValueError(f"Could not transition to Resolved first: {_fs_error(resolve_resp)}")
+            
+            
+            
+
+#         # Now set to Closed (5)
+#         close_resp = await client.put(f"/tickets/{ticket_id}", json={"status": 5})
+#         if not close_resp.is_success:
+#             raise ValueError(f"Could not close ticket #{ticket_id}: {_fs_error(close_resp)}")
+
+#         # Add private closing note — only after both status changes confirmed
+#         await client.post(
+#             f"/tickets/{ticket_id}/notes",
+#             json={"body": closing_note, "private": True}
+#         )
+
+#         return {
+#             "ticket_id": ticket_id,
+#             "status":    5,
+#             "message":   f"Ticket #{ticket_id} has been permanently closed.",
+#         }
+
+
 async def close_ticket(ticket_id: int, closing_note: str) -> dict:
-    """
-    Permanently closes a ticket.
-    Freshservice requires two steps — resolve first (4), then close (5).
-    Jumping straight to Closed from Open/Pending causes a 400 error.
-    """
     async with _get_client() as client:
 
-        # Step 1 — add private closing note
+        # Fetch ticket first — check status and assignment
+        ticket_resp = await client.get(f"/tickets/{ticket_id}")
+        if not ticket_resp.is_success:
+            raise ValueError(f"Ticket #{ticket_id} not found. ({_fs_error(ticket_resp)})")
+
+        ticket         = ticket_resp.json().get("ticket", {})
+        current_status = ticket.get("status", 2)
+        responder_id   = ticket.get("responder_id")
+
+        # Already closed — nothing to do
+        if current_status == 5:
+            return {
+                "ticket_id": ticket_id,
+                "status":    5,
+                "message":   f"Ticket #{ticket_id} is already Closed. No changes made.",
+            }
+
+        # Block if no agent assigned
+        if not responder_id:
+            raise ValueError(
+                f"Ticket #{ticket_id} cannot be closed — no agent assigned. "
+                "Assign it to an agent first."
+            )
+
+        # Must go through Resolved (4) before Closed (5)
+        # resolution_notes fills the Resolution field — required by Freshservice
+        if current_status in [2, 3]:
+            resolve_resp = await client.put(
+                f"/tickets/{ticket_id}",
+                json={
+                    "status":           4,
+                    "resolution_notes": closing_note,
+                }
+            )
+            if not resolve_resp.is_success:
+                raise ValueError(f"Could not transition to Resolved first: {_fs_error(resolve_resp)}")
+
+        # Now set to Closed (5)
+        close_resp = await client.put(f"/tickets/{ticket_id}", json={"status": 5})
+        if not close_resp.is_success:
+            raise ValueError(f"Could not close ticket #{ticket_id}: {_fs_error(close_resp)}")
+
+        # Add private closing note — only after both status changes confirmed
         await client.post(
             f"/tickets/{ticket_id}/notes",
-            json={
-                "body":    closing_note,
-                "private": True,
-            }
+            json={"body": closing_note, "private": True}
         )
-
-        # Step 2 — set to Resolved (4) first
-        # Freshservice rejects a direct jump to Closed (5) from Open/Pending
-        resolve_resp = await client.put(
-            f"/tickets/{ticket_id}",
-            json={"status": 4}
-        )
-        # Accept 400 here — Freshservice sometimes returns 400 even on success
-        # for status transitions (known Freshservice quirk)
-        if resolve_resp.status_code not in [200, 201, 400]:
-            resolve_resp.raise_for_status()
-
-        # Step 3 — now set to Closed (5)
-        close_resp = await client.put(
-            f"/tickets/{ticket_id}",
-            json={"status": 5}
-        )
-        if close_resp.status_code not in [200, 201, 400]:
-            close_resp.raise_for_status()
 
         return {
             "ticket_id": ticket_id,
             "status":    5,
             "message":   f"Ticket #{ticket_id} has been permanently closed.",
         }
+        
         
 
 # async def get_ticket_assignee(ticket_id: int) -> dict:

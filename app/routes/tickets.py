@@ -12,7 +12,7 @@ Endpoint summary:
   POST   /tickets/{ticket_id}/notes → Add a note to a ticket
 """
 
-from fastapi import APIRouter, Depends, Query, HTTPException, Header, status
+from fastapi import APIRouter, Depends, Query
 from typing import Optional
 
 from app.security import verify_api_key

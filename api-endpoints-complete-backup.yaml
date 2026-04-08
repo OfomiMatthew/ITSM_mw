@@ -1,0 +1,1101 @@
+openapi: 3.0.0
+info:
+  title: Freshservice Middleware API - Complete Documentation
+  description: |
+    A comprehensive middleware layer between Microsoft Copilot Studio / Power Automate 
+    and the Freshservice ITSM REST API.
+
+    **Authentication:** All endpoints (except /health and /) require the `x-api-key` header.
+
+    **User Roles:**
+    - **Requester:** Can create tickets, view own tickets, add notes
+    - **Agent:** Can do everything a requester can + view team tickets, update any ticket
+    - **Manager:** Can do everything + analytics, SLA monitoring, assignments, reports
+
+  version: 3.0.0
+  contact:
+    name: IT Support Team
+    email: support@company.com
+
+servers:
+  - url: https://saconsulting-freshservice-api-gzarfrhvbharcwfe.ukwest-01.azurewebsites.net
+    description: Production Azure server
+  - url: http://localhost:8000
+    description: Local development server
+
+security:
+  - ApiKeyAuth: []
+
+tags:
+  - name: System
+    description: Health check and system status endpoints
+  - name: Tickets
+    description: Core ticket management - create, view, update, add notes
+  - name: Users & Roles
+    description: User authentication and role detection
+  - name: Manager Operations
+    description: Team ticket views, assignments, and analytics
+  - name: Manager Reports
+    description: Performance reports and dashboard data
+  - name: Advanced Manager
+    description: SLA monitoring, unassigned tickets, and weekly reports
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: x-api-key
+      description: |
+        Middleware API key from your .env file (MIDDLEWARE_API_KEY).
+        Example: `x-api-key: 6730455c35b58822512404656522c30eb7dbb2d72650e0b703094a46c884db56`
+
+  schemas:
+    # ──────────────────────────────────────────────────────────────────────────
+    # REQUEST SCHEMAS
+    # ──────────────────────────────────────────────────────────────────────────
+    CreateTicketRequest:
+      type: object
+      required:
+        - subject
+        - description
+        - email
+      properties:
+        subject:
+          type: string
+          description: Ticket title/summary
+          example: "Laptop won't boot"
+        description:
+          type: string
+          description: Full description of the issue
+          example: "My laptop shows a black screen when I press the power button. I've tried holding the power button for 10 seconds but nothing happens."
+        email:
+          type: string
+          format: email
+          description: Requester's email address
+          example: "john.smith@company.com"
+        priority:
+          type: integer
+          description: "1=Low, 2=Medium, 3=High, 4=Urgent"
+          enum: [1, 2, 3, 4]
+          default: 2
+        category:
+          type: string
+          description: Issue category
+          example: "Hardware"
+
+    UpdateTicketRequest:
+      type: object
+      properties:
+        priority:
+          type: integer
+          description: "1=Low, 2=Medium, 3=High, 4=Urgent"
+          enum: [1, 2, 3, 4]
+        status:
+          type: integer
+          description: "2=Open, 3=Pending, 4=Resolved, 5=Closed"
+          enum: [2, 3, 4, 5]
+
+    AddNoteRequest:
+      type: object
+      required:
+        - body
+      properties:
+        body:
+          type: string
+          description: The note content
+          example: "User called to follow up. Issue still persists."
+        private:
+          type: boolean
+          description: If true, only agents/managers see this note
+          default: false
+        author_name:
+          type: string
+          description: Name of the person adding the note
+          example: "Matthew Ofomi"
+        author_email:
+          type: string
+          format: email
+          description: Email of the person adding the note
+          example: "mofomi@company.com"
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # RESPONSE SCHEMAS
+    # ──────────────────────────────────────────────────────────────────────────
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: "ok"
+        service:
+          type: string
+          example: "freshservice-middleware"
+        env:
+          type: string
+          example: "production"
+
+    GenericResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+
+    CreateTicketResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        ticket_id:
+          type: integer
+          example: 147
+        subject:
+          type: string
+        message:
+          type: string
+          example: "Ticket #147 created successfully."
+
+    TicketDetail:
+      type: object
+      properties:
+        ticket_id:
+          type: integer
+        subject:
+          type: string
+        description:
+          type: string
+        status:
+          type: integer
+        status_label:
+          type: string
+          example: "Open"
+        priority:
+          type: integer
+        priority_label:
+          type: string
+          example: "High"
+        requester_email:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        is_overdue:
+          type: boolean
+        category:
+          type: string
+
+    GetTicketResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        ticket:
+          $ref: "#/components/schemas/TicketDetail"
+        error_message:
+          type: string
+
+    TicketListResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        ticket_count:
+          type: integer
+        tickets:
+          type: array
+          items:
+            $ref: "#/components/schemas/TicketDetail"
+        summary:
+          type: string
+          description: Pre-formatted text summary for display in Copilot Studio
+
+    UserRoleResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        email:
+          type: string
+        display_name:
+          type: string
+        role:
+          type: string
+          enum: ["requester", "agent", "manager", "admin", "unknown"]
+        is_manager:
+          type: boolean
+        is_agent:
+          type: boolean
+        is_requester:
+          type: boolean
+        can_view_team_tickets:
+          type: boolean
+        can_view_analytics:
+          type: boolean
+        can_assign_tickets:
+          type: boolean
+        error_message:
+          type: string
+
+    TicketAnalytics:
+      type: object
+      properties:
+        total_open:
+          type: integer
+        total_pending:
+          type: integer
+        total_resolved:
+          type: integer
+        total_closed:
+          type: integer
+        overdue_count:
+          type: integer
+        urgent_count:
+          type: integer
+        high_priority_count:
+          type: integer
+
+    AnalyticsResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        analytics:
+          $ref: "#/components/schemas/TicketAnalytics"
+        summary:
+          type: string
+          description: Formatted analytics report for display
+
+    SLABreachTicket:
+      type: object
+      properties:
+        ticket_id:
+          type: integer
+        subject:
+          type: string
+        priority:
+          type: integer
+        priority_label:
+          type: string
+        breach_status:
+          type: string
+          enum: ["already_breached", "breach_in_1hr", "breach_in_4hrs"]
+        due_by:
+          type: string
+          format: date-time
+
+    SLABreachResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        breach_count:
+          type: integer
+        breaches:
+          type: array
+          items:
+            $ref: "#/components/schemas/SLABreachTicket"
+        summary:
+          type: string
+
+    Asset:
+      type: object
+      properties:
+        name:
+          type: string
+        asset_type:
+          type: string
+          example: "Laptop"
+        status:
+          type: string
+          example: "In Use"
+        serial:
+          type: string
+
+    AssetResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        asset_count:
+          type: integer
+        assets:
+          type: array
+          items:
+            $ref: "#/components/schemas/Asset"
+        summary:
+          type: string
+
+    KBArticle:
+      type: object
+      properties:
+        title:
+          type: string
+        category:
+          type: string
+        url:
+          type: string
+
+    KBSearchResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        result_count:
+          type: integer
+        articles:
+          type: array
+          items:
+            $ref: "#/components/schemas/KBArticle"
+        summary:
+          type: string
+
+    AssignTicketResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+        ticket_id:
+          type: integer
+        assigned_to:
+          type: string
+
+paths:
+  # ══════════════════════════════════════════════════════════════════════════════
+  # SYSTEM ENDPOINTS
+  # ══════════════════════════════════════════════════════════════════════════════
+  /health:
+    get:
+      tags:
+        - System
+      summary: Health check
+      description: |
+        Returns service status. No authentication required.
+        Use this for uptime monitoring and load balancer health checks.
+      security: []
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+
+  /:
+    get:
+      tags:
+        - System
+      summary: Root endpoint (redirects to docs)
+      description: Redirects to /docs (Swagger UI documentation page)
+      security: []
+      responses:
+        "302":
+          description: Redirect to API documentation
+
+  # ══════════════════════════════════════════════════════════════════════════════
+  # TICKET ENDPOINTS
+  # ══════════════════════════════════════════════════════════════════════════════
+  /tickets:
+    post:
+      tags:
+        - Tickets
+      summary: Create a new ticket
+      description: |
+        Creates a new incident ticket in Freshservice.
+
+        **Power Automate Flow:** "Create Ticket"
+
+        **cURL Example:**
+        ```bash
+        curl -X POST "https://your-app.azurewebsites.net/tickets" \
+          -H "x-api-key: YOUR_KEY" \
+          -H "Content-Type: application/json" \
+          -d '{
+            "subject": "Laptop won'\''t boot",
+            "description": "Black screen when powered on",
+            "email": "john@company.com",
+            "priority": 3,
+            "category": "Hardware"
+          }'
+        ```
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateTicketRequest"
+      responses:
+        "201":
+          description: Ticket created successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateTicketResponse"
+
+    get:
+      tags:
+        - Tickets
+      summary: List tickets for a user
+      description: |
+        Returns all tickets for a specific user, optionally filtered by status.
+
+        **Power Automate Flow:** "Get My Open Tickets"
+
+        **Security:** Users can only view their own tickets (unless they're agents/managers).
+      parameters:
+        - name: email
+          in: query
+          required: true
+          schema:
+            type: string
+            format: email
+          description: Requester's email address
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: integer
+            enum: [2, 3, 4, 5]
+          description: "Filter by status: 2=Open, 3=Pending, 4=Resolved, 5=Closed"
+      responses:
+        "200":
+          description: List of tickets
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TicketListResponse"
+
+  /tickets/{ticket_id}:
+    get:
+      tags:
+        - Tickets
+      summary: Get ticket details by ID
+      description: |
+        Retrieves full details of a specific ticket.
+
+        **Power Automate Flow:** "Get Ticket Status"
+      parameters:
+        - name: ticket_id
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: The ticket ID
+          example: 147
+      responses:
+        "200":
+          description: Ticket details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GetTicketResponse"
+
+    put:
+      tags:
+        - Tickets
+      summary: Update ticket priority or status
+      description: |
+        Updates a ticket's priority and/or status.
+
+        **Power Automate Flow:** "Update Ticket"
+
+        **Note:** Requesters cannot set status to Resolved (4) or Closed (5).
+        Only agents and managers can resolve/close tickets.
+      parameters:
+        - name: ticket_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateTicketRequest"
+      responses:
+        "200":
+          description: Ticket updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenericResponse"
+
+  /tickets/{ticket_id}/notes:
+    post:
+      tags:
+        - Tickets
+      summary: Add a note to a ticket
+      description: |
+        Adds a comment/note to an existing ticket.
+
+        **Power Automate Flow:** "Add Note"
+
+        Notes can be public (visible to requester) or private (agents/managers only).
+      parameters:
+        - name: ticket_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddNoteRequest"
+      responses:
+        "201":
+          description: Note added successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenericResponse"
+
+  /tickets/requesters:
+    post:
+      tags:
+        - Tickets
+      summary: Create a new requester (employee)
+      description: |
+        Creates a new employee record in Freshservice as a requester.
+
+        Called automatically when a new employee uses the Copilot Studio agent 
+        for the first time and doesn't exist in Freshservice yet.
+      parameters:
+        - name: first_name
+          in: query
+          required: true
+          schema:
+            type: string
+          example: "John"
+        - name: last_name
+          in: query
+          required: true
+          schema:
+            type: string
+          example: "Smith"
+        - name: email
+          in: query
+          required: true
+          schema:
+            type: string
+            format: email
+          example: "john.smith@company.com"
+      responses:
+        "201":
+          description: Requester created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                  name:
+                    type: string
+                  email:
+                    type: string
+
+  # ══════════════════════════════════════════════════════════════════════════════
+  # USER & ROLE ENDPOINTS
+  # ══════════════════════════════════════════════════════════════════════════════
+  /users/role:
+    get:
+      tags:
+        - Users & Roles
+      summary: Get user role and permissions
+      description: |
+        **CRITICAL ENDPOINT** — Called at the start of every Copilot Studio conversation.
+
+        Determines if the user is a:
+        - **Requester:** Can only create/view own tickets
+        - **Agent:** Can view/update all tickets
+        - **Manager:** Can do everything + analytics and reports
+
+        The agent uses this response to show the correct menu options.
+
+        **Power Automate Flow:** "Check User Role"
+      parameters:
+        - name: email
+          in: query
+          required: true
+          schema:
+            type: string
+            format: email
+          description: User's email address from Microsoft SSO
+          example: "manager@company.com"
+      responses:
+        "200":
+          description: User role information
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserRoleResponse"
+
+  # ══════════════════════════════════════════════════════════════════════════════
+  # MANAGER OPERATIONS — Team Management
+  # ══════════════════════════════════════════════════════════════════════════════
+  /manager/tickets:
+    get:
+      tags:
+        - Manager Operations
+      summary: Get all team tickets
+      description: |
+        Returns ALL tickets across the entire Freshservice account.
+
+        **Access:** Managers and Agents only.
+
+        Use this for:
+        - Team standup meetings
+        - Workload distribution
+        - Spotting overdue tickets
+
+        Can filter by status and priority.
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: integer
+            enum: [2, 3, 4, 5]
+          description: "Filter by status: 2=Open, 3=Pending, 4=Resolved, 5=Closed"
+        - name: priority
+          in: query
+          required: false
+          schema:
+            type: integer
+            enum: [1, 2, 3, 4]
+          description: "Filter by priority: 1=Low, 2=Medium, 3=High, 4=Urgent"
+        - name: per_page
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 20
+            maximum: 30
+          description: Number of tickets to return
+      responses:
+        "200":
+          description: Team tickets list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TicketListResponse"
+
+  /manager/analytics:
+    get:
+      tags:
+        - Manager Reports
+      summary: Get ticket analytics dashboard
+      description: |
+        Returns a complete snapshot of IT support desk performance:
+        - Total open, pending, resolved, closed tickets
+        - Overdue ticket count
+        - Urgent and high priority counts
+
+        Perfect for daily standup reports or management dashboards.
+
+        **Power Automate Flow:** "Get Analytics Dashboard"
+      responses:
+        "200":
+          description: Analytics data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnalyticsResponse"
+              example:
+                success: true
+                analytics:
+                  total_open: 23
+                  total_pending: 8
+                  total_resolved: 145
+                  total_closed: 890
+                  overdue_count: 3
+                  urgent_count: 2
+                  high_priority_count: 7
+                summary: |
+                  📊 IT Support Desk — Live Snapshot
+                  ────────────────────────────────
+                  🟢 Open:          23
+                  🟡 Pending:       8
+                  ✅ Resolved:      145
+                  ⛔ Closed:        890
+                  ────────────────────────────────
+                  🔴 Overdue:       3
+                  🔥 Urgent:        2
+                  ⚠  High Priority: 7
+
+  /manager/sla-breaches:
+    get:
+      tags:
+        - Advanced Manager
+      summary: Get SLA breach alerts
+      description: |
+        **MOST CRITICAL MANAGER ENDPOINT** — Proactive SLA monitoring.
+
+        Finds tickets that have:
+        1. Already breached their SLA deadline 🔴
+        2. Will breach within 1 hour 🟠
+        3. Will breach within 4 hours 🟡
+
+        Use this to prevent SLA violations and customer escalations.
+
+        **Recommended:** Run this every 30 minutes via scheduled Power Automate flow.
+      responses:
+        "200":
+          description: SLA breach alerts
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SLABreachResponse"
+
+  /manager/assets:
+    get:
+      tags:
+        - Manager Operations
+      summary: Get IT assets assigned to a user
+      description: |
+        Returns all IT assets (laptops, phones, monitors, etc.) assigned to a user.
+
+        **Use Case:** When creating a ticket, automatically look up what devices 
+        the user has to pre-fill the "Affected Asset" field.
+      parameters:
+        - name: email
+          in: query
+          required: true
+          schema:
+            type: string
+            format: email
+          example: "john.smith@company.com"
+      responses:
+        "200":
+          description: List of assets
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AssetResponse"
+
+  /manager/knowledge-base/search:
+    get:
+      tags:
+        - Manager Operations
+      summary: Search knowledge base articles
+      description: |
+        Searches Freshservice's knowledge base for self-service solutions.
+
+        **Best Practice Flow:**
+        1. User describes issue
+        2. Agent searches KB first
+        3. If solution exists → show it
+        4. If not → create ticket
+
+        This reduces unnecessary ticket creation by 30-40%.
+      parameters:
+        - name: query
+          in: query
+          required: true
+          schema:
+            type: string
+          example: "wifi not working"
+      responses:
+        "200":
+          description: Knowledge base search results
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KBSearchResponse"
+
+  /manager/tickets/{ticket_id}/assign:
+    put:
+      tags:
+        - Manager Operations
+      summary: Assign ticket to an agent
+      description: |
+        Assigns a ticket to a specific IT agent by their email.
+
+        **Access:** Managers only.
+
+        Use when:
+        - Distributing workload
+        - Assigning specialist tickets (e.g., network issues → network team)
+        - Clearing unassigned ticket queue
+      parameters:
+        - name: ticket_id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: agent_email
+          in: query
+          required: true
+          schema:
+            type: string
+            format: email
+          example: "agent@company.com"
+      responses:
+        "200":
+          description: Ticket assigned successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AssignTicketResponse"
+
+  /manager/tickets/{ticket_id}/resolve:
+    post:
+      tags:
+        - Manager Operations
+      summary: Resolve a ticket
+      description: |
+        Marks a ticket as **Resolved** (status 4) and adds a resolution note.
+
+        The requester gets an automatic email notification.
+
+        **Access:** Agents and Managers only.
+
+        **Note:** Resolved tickets can still be reopened by the requester.
+        For permanent closure, use `/manager/tickets/{ticket_id}/close` instead.
+      parameters:
+        - name: ticket_id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: resolution_note
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 10
+          description: What fixed the issue?
+          example: "Reinstalled WiFi driver. Issue resolved."
+      responses:
+        "200":
+          description: Ticket resolved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  ticket_id:
+                    type: integer
+                  message:
+                    type: string
+
+  /manager/tickets/{ticket_id}:
+    put:
+      tags:
+        - Manager Operations
+      summary: Update ticket (manager version)
+      description: |
+        Updates a ticket's priority and/or status.
+
+        **Difference from `/tickets/{ticket_id}`:** 
+        This manager endpoint can update ANY ticket, not just own tickets.
+
+        Send 0 for fields you don't want to change.
+      parameters:
+        - name: ticket_id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: new_priority
+          in: query
+          required: false
+          schema:
+            type: integer
+            enum: [0, 1, 2, 3, 4]
+            default: 0
+          description: "Priority: 1=Low, 2=Medium, 3=High, 4=Urgent. Send 0 to skip."
+        - name: new_status
+          in: query
+          required: false
+          schema:
+            type: integer
+            enum: [0, 2, 3, 4, 5]
+            default: 0
+          description: "Status: 2=Open, 3=Pending, 4=Resolved, 5=Closed. Send 0 to skip."
+      responses:
+        "200":
+          description: Ticket updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+
+  /manager/tickets/{ticket_id}/close:
+    post:
+      tags:
+        - Advanced Manager
+      summary: Permanently close a ticket
+      description: |
+        Sets ticket status to **Closed** (status 5).
+
+        **Critical Difference from Resolved:**
+        - Resolved (4): Can be reopened by requester
+        - Closed (5): Cannot be reopened — permanent closure
+
+        Use when:
+        - Ticket was created in error
+        - Issue is duplicate
+        - Requester confirmed resolution weeks ago
+      parameters:
+        - name: ticket_id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: closing_note
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 5
+          description: Reason for closing
+          example: "Duplicate of ticket #145. Closing."
+      responses:
+        "200":
+          description: Ticket closed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  ticket_id:
+                    type: integer
+                  message:
+                    type: string
+
+  /manager/tickets/{ticket_id}/assignee:
+    get:
+      tags:
+        - Manager Operations
+      summary: Get ticket assignee
+      description: |
+        Returns the agent currently assigned to a ticket.
+
+        Returns `assigned: false` if no agent is assigned yet.
+      parameters:
+        - name: ticket_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Assignee information
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  ticket_id:
+                    type: integer
+                  assigned:
+                    type: boolean
+                  agent_name:
+                    type: string
+                  agent_email:
+                    type: string
+
+  /manager/tickets/unassigned:
+    get:
+      tags:
+        - Advanced Manager
+      summary: Get all unassigned tickets
+      description: |
+        Returns every open ticket with no agent assigned.
+
+        **Why This Matters:**
+        Unassigned tickets are the biggest SLA risk — they're open but nobody 
+        is working on them.
+
+        **Recommended Workflow:**
+        1. Run this endpoint
+        2. For each unassigned ticket, call `/manager/tickets/{id}/assign`
+        3. Distribute work evenly across your team
+      responses:
+        "200":
+          description: List of unassigned tickets
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  ticket_count:
+                    type: integer
+                  tickets:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/TicketDetail"
+                  summary:
+                    type: string
+
+  /manager/reports/weekly:
+    get:
+      tags:
+        - Manager Reports
+      summary: Get weekly performance report
+      description: |
+        Returns a comprehensive IT support performance report for the past 7 days:
+        - Tickets created
+        - Tickets resolved
+        - Still open
+        - Average resolution time
+        - Breakdown by priority
+
+        **Use Case:** Copy this directly into your weekly management report.
+
+        **Recommended:** Run this every Monday morning via scheduled Power Automate.
+      responses:
+        "200":
+          description: Weekly report
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  period:
+                    type: string
+                    example: "Jan 18 - Jan 25, 2026"
+                  tickets_created:
+                    type: integer
+                  tickets_resolved:
+                    type: integer
+                  tickets_still_open:
+                    type: integer
+                  avg_resolution_hours:
+                    type: number
+                  breakdown_by_priority:
+                    type: object
+                  summary:
+                    type: string
+                    description: Pre-formatted report for copying
+
+externalDocs:
+  description: FastAPI Auto-Generated Documentation
+  url: https://saconsulting-freshservice-api-gzarfrhvbharcwfe.ukwest-01.azurewebsites.net/docs

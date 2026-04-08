@@ -1,0 +1,949 @@
+openapi: 3.0.0
+info:
+  title: Freshservice Middleware API
+  description: |
+    A middleware layer between Microsoft Copilot Studio / Power Automate and the Freshservice ITSM REST API.
+
+  version: 3.0.0
+  contact:
+    name: IT Support Team
+
+servers:
+  - url: https://saconsulting-freshservice-api-gzarfrhvbharcwfe.ukwest-01.azurewebsites.net
+    description: Production Azure server
+
+security:
+  - ApiKeyAuth: []
+
+tags:
+  - name: System
+    description: Health check and system status endpoints
+  - name: Tickets
+    description: Ticket management endpoints for creating, viewing, updating tickets
+  - name: Users & Roles
+    description: User role detection and authentication
+  - name: Manager & Admin
+    description: Manager and admin-only endpoints for team management
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: x-api-key
+      description: Middleware API key from your .env file
+
+paths:
+  # ============================================================================
+  # SYSTEM ENDPOINTS
+  # ============================================================================
+  /health:
+    get:
+      tags:
+        - System
+      summary: Health check
+      description: Returns OK if the service is running. No auth required.
+      security: []
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  service:
+                    type: string
+                    example: freshservice-middleware
+                  env:
+                    type: string
+                    example: development
+
+  /:
+    get:
+      tags:
+        - System
+      summary: Root endpoint
+      description: Redirects to /docs (Swagger UI)
+      security: []
+      responses:
+        "302":
+          description: Redirect to API documentation
+
+  # ============================================================================
+  # TICKET ENDPOINTS
+  # ============================================================================
+  /tickets:
+    post:
+      tags:
+        - Tickets
+      summary: Create a new ticket
+      description: |
+        Called by Power Automate flow: **Create Ticket**. Raises a new incident in Freshservice.
+
+        Example Power Automate HTTP action:
+        - Method: POST
+        - URI: https://saconsulting-freshservice-api-gzarfrhvbharcwfe.ukwest-01.azurewebsites.net/tickets
+        - Header: x-api-key = 6730455c35b58822512404656522c30eb7dbb2d72650e0b703094a46c884db56
+        - Body: { subject, description, email, priority, category }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - subject
+                - description
+                - email
+              properties:
+                subject:
+                  type: string
+                  description: Ticket subject/title
+                description:
+                  type: string
+                  description: Detailed description of the issue
+                email:
+                  type: string
+                  format: email
+                  description: Requester's email address
+                priority:
+                  type: integer
+                  description: 1=Low, 2=Medium, 3=High, 4=Urgent
+                  default: 2
+                category:
+                  type: string
+                  description: Ticket category
+      responses:
+        "201":
+          description: Ticket created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  ticket_id:
+                    type: integer
+                  subject:
+                    type: string
+                  message:
+                    type: string
+
+    get:
+      tags:
+        - Tickets
+      summary: List open tickets for a user
+      description: |
+        Called by Power Automate flow: **Get My Open Tickets**.
+
+        Example Power Automate HTTP action:
+        - Method: GET
+        - URI: https://saconsulting-freshservice-api-gzarfrhvbharcwfe.ukwest-01.azurewebsites.net/tickets?email=user@company.com
+        - Header: x-api-key = 6730455c35b58822512404656522c30eb7dbb2d72650e0b703094a46c884db56
+      parameters:
+        - name: email
+          in: query
+          required: true
+          description: Requester email address
+          schema:
+            type: string
+            format: email
+        - name: status
+          in: query
+          required: false
+          description: Filter by status code. Default 2=Open. Pass null for all.
+          schema:
+            type: integer
+            default: 2
+      responses:
+        "200":
+          description: List of tickets
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  ticket_count:
+                    type: integer
+                  tickets:
+                    type: array
+                    items:
+                      type: object
+                  summary:
+                    type: string
+
+  /tickets/{ticket_id}:
+    get:
+      tags:
+        - Tickets
+      summary: Get a ticket by ID
+      description: |
+        Called by Power Automate flow: **Get Ticket Status**.
+
+        Example Power Automate HTTP action:
+        - Method: GET
+        - URI: https://saconsulting-freshservice-api-gzarfrhvbharcwfe.ukwest-01.azurewebsites.net/tickets/12345
+        - Header: x-api-key = 6730455c35b58822512404656522c30eb7dbb2d72650e0b703094a46c884db56
+      parameters:
+        - name: ticket_id
+          in: path
+          required: true
+          description: The ticket ID
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Ticket details
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  ticket:
+                    type: object
+                  error_message:
+                    type: string
+
+    put:
+      tags:
+        - Tickets
+      summary: Update a ticket
+      description: |
+        Called by Power Automate flow: **Update Ticket**. Change priority or status.
+
+        Example Power Automate HTTP action:
+        - Method: PUT
+        - URI: https://saconsulting-freshservice-api-gzarfrhvbharcwfe.ukwest-01.azurewebsites.net/tickets/12345
+        - Header: x-api-key = 6730455c35b58822512404656522c30eb7dbb2d72650e0b703094a46c884db56
+        - Body: { "priority": 3 }
+      parameters:
+        - name: ticket_id
+          in: path
+          required: true
+          description: The ticket ID
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                priority:
+                  type: integer
+                  description: 1=Low, 2=Medium, 3=High, 4=Urgent
+                status:
+                  type: integer
+                  description: 2=Open, 3=Pending, 4=Resolved, 5=Closed
+      responses:
+        "200":
+          description: Ticket updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+
+  /tickets/{ticket_id}/notes:
+    post:
+      tags:
+        - Tickets
+      summary: Add a note to a ticket
+      description: |
+        Called by Power Automate flow: **Add Note**.
+
+        Example Power Automate HTTP action:
+        - Method: POST
+        - URI: https://saconsulting-freshservice-api-gzarfrhvbharcwfe.ukwest-01.azurewebsites.net/tickets/12345/notes
+        - Header: x-api-key = 6730455c35b58822512404656522c30eb7dbb2d72650e0b703094a46c884db56
+        - Body: { "body": "User called to follow up.", "private": true, "author_name": "Matthew Ofomi", "author_email": "mofomi@saconsulting.ai" }
+      parameters:
+        - name: ticket_id
+          in: path
+          required: true
+          description: The ticket ID
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - body
+              properties:
+                body:
+                  type: string
+                  description: The note content
+                private:
+                  type: boolean
+                  description: Whether the note should be private (not visible to requester)
+                  default: false
+                author_name:
+                  type: string
+                  description: Name of the person adding the note
+                author_email:
+                  type: string
+                  format: email
+                  description: Email of the person adding the note
+      responses:
+        "201":
+          description: Note added successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+
+  /tickets/requesters:
+    post:
+      tags:
+        - Tickets
+      summary: Create a new requester (employee)
+      description: |
+        Creates a brand new employee in Freshservice as a requester.
+        Called automatically when a new employee uses the agent for the first time 
+        and does not yet exist in Freshservice.
+
+        Example Power Automate HTTP action:
+        - Method: POST
+        - URI: https://saconsulting-freshservice-api-gzarfrhvbharcwfe.ukwest-01.azurewebsites.net/tickets/requesters?first_name=John&last_name=Smith&email=john@company.com
+        - Header: x-api-key = 6730455c35b58822512404656522c30eb7dbb2d72650e0b703094a46c884db56
+      parameters:
+        - name: first_name
+          in: query
+          required: true
+          description: First name of the new employee
+          schema:
+            type: string
+        - name: last_name
+          in: query
+          required: true
+          description: Last name of the new employee
+          schema:
+            type: string
+        - name: email
+          in: query
+          required: true
+          description: Work email address
+          schema:
+            type: string
+            format: email
+      responses:
+        "201":
+          description: Requester created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+
+  # ============================================================================
+  # USERS & ROLES ENDPOINTS
+  # ============================================================================
+  /users/role:
+    get:
+      tags:
+        - Users & Roles
+      summary: Get user role
+      description: |
+        Called at the START of every Copilot Studio conversation.
+        Tells the agent if the user is a regular requester, an IT agent, or a manager — 
+        so it can show the right menu.
+
+        Power Automate HTTP action:
+        - Method: GET
+        - URI: https://saconsulting-freshservice-api-gzarfrhvbharcwfe.ukwest-01.azurewebsites.net/users/role?email=user@company.com
+        - Header: x-api-key = 6730455c35b58822512404656522c30eb7dbb2d72650e0b703094a46c884db56
+      parameters:
+        - name: email
+          in: query
+          required: true
+          description: The user's email address
+          schema:
+            type: string
+            format: email
+      responses:
+        "200":
+          description: User role information
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  email:
+                    type: string
+                  display_name:
+                    type: string
+                  role:
+                    type: string
+                    enum: [requester, agent, manager, unknown]
+                  is_manager:
+                    type: boolean
+                  is_agent:
+                    type: boolean
+                  is_requester:
+                    type: boolean
+                  can_view_team_tickets:
+                    type: boolean
+                  can_view_analytics:
+                    type: boolean
+                  can_assign_tickets:
+                    type: boolean
+                  error_message:
+                    type: string
+
+  # ============================================================================
+  # MANAGER & ADMIN ENDPOINTS
+  # ============================================================================
+  /manager/tickets:
+    get:
+      tags:
+        - Manager & Admin
+      summary: Get all team tickets
+      description: |
+        Returns ALL tickets across the Freshservice account.
+        Managers use this to see everything happening across the IT team.
+        Optionally filter by status or priority.
+
+        Power Automate HTTP action:
+        - Method: GET
+        - URI: https://saconsulting-freshservice-api-gzarfrhvbharcwfe.ukwest-01.azurewebsites.net/manager/tickets?status=2
+        - Header: x-api-key = 6730455c35b58822512404656522c30eb7dbb2d72650e0b703094a46c884db56
+      parameters:
+        - name: status
+          in: query
+          required: false
+          description: Filter by status. 2=Open, 3=Pending, 4=Resolved, 5=Closed
+          schema:
+            type: integer
+        - name: priority
+          in: query
+          required: false
+          description: Filter by priority. 1=Low, 2=Medium, 3=High, 4=Urgent
+          schema:
+            type: integer
+        - name: per_page
+          in: query
+          required: false
+          description: How many tickets to return. Max 30.
+          schema:
+            type: integer
+            default: 20
+            maximum: 30
+      responses:
+        "200":
+          description: Team tickets list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  ticket_count:
+                    type: integer
+                  tickets:
+                    type: array
+                    items:
+                      type: object
+                  summary:
+                    type: string
+                  error_message:
+                    type: string
+
+  /manager/analytics:
+    get:
+      tags:
+        - Manager & Admin
+      summary: Get ticket analytics
+      description: |
+        Returns a full snapshot of the IT support desk.
+        How many tickets are open, pending, resolved, overdue, high priority, and urgent.
+        Perfect for a daily standup report.
+
+        Power Automate HTTP action:
+        - Method: GET
+        - URI: https://saconsulting-freshservice-api-gzarfrhvbharcwfe.ukwest-01.azurewebsites.net/manager/analytics
+        - Header: x-api-key = 6730455c35b58822512404656522c30eb7dbb2d72650e0b703094a46c884db56
+      responses:
+        "200":
+          description: Analytics data
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  analytics:
+                    type: object
+                    properties:
+                      total_open:
+                        type: integer
+                      total_pending:
+                        type: integer
+                      total_resolved:
+                        type: integer
+                      total_closed:
+                        type: integer
+                      overdue_count:
+                        type: integer
+                      urgent_count:
+                        type: integer
+                      high_priority_count:
+                        type: integer
+                  summary:
+                    type: string
+                  error_message:
+                    type: string
+
+  /manager/sla-breaches:
+    get:
+      tags:
+        - Manager & Admin
+      summary: Get SLA breach alerts
+      description: |
+        Finds tickets that have ALREADY breached their SLA deadline or are at risk of breaching 
+        within the next 4 hours. This is the most proactive and powerful manager feature.
+
+        Power Automate HTTP action:
+        - Method: GET
+        - URI: https://saconsulting-freshservice-api-gzarfrhvbharcwfe.ukwest-01.azurewebsites.net/manager/sla-breaches
+        - Header: x-api-key = 6730455c35b58822512404656522c30eb7dbb2d72650e0b703094a46c884db56
+      responses:
+        "200":
+          description: SLA breach alerts
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  breach_count:
+                    type: integer
+                  breaches:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        ticket_id:
+                          type: integer
+                        subject:
+                          type: string
+                        priority_label:
+                          type: string
+                        breach_status:
+                          type: string
+                          enum:
+                            [already_breached, breach_in_1hr, breach_in_4hrs]
+                  summary:
+                    type: string
+                  error_message:
+                    type: string
+
+  /manager/assets:
+    get:
+      tags:
+        - Manager & Admin
+      summary: Get assets for a user
+      description: |
+        Returns all IT assets (laptops, phones, monitors etc.) assigned to a specific user.
+        Used when a ticket is raised to pre-fill the affected device details automatically.
+
+        Power Automate HTTP action:
+        - Method: GET
+        - URI: https://saconsulting-freshservice-api-gzarfrhvbharcwfe.ukwest-01.azurewebsites.net/manager/assets?email=user@company.com
+        - Header: x-api-key = 6730455c35b58822512404656522c30eb7dbb2d72650e0b703094a46c884db56
+      parameters:
+        - name: email
+          in: query
+          required: true
+          description: The user's email address
+          schema:
+            type: string
+            format: email
+      responses:
+        "200":
+          description: User's assets
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  asset_count:
+                    type: integer
+                  assets:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name:
+                          type: string
+                        asset_type:
+                          type: string
+                        status:
+                          type: string
+                        serial:
+                          type: string
+                  summary:
+                    type: string
+                  error_message:
+                    type: string
+
+  /manager/knowledge-base/search:
+    get:
+      tags:
+        - Manager & Admin
+      summary: Search knowledge base
+      description: |
+        Searches Freshservice's knowledge base for self-service articles.
+        Called BEFORE raising a ticket — if a solution already exists, show it to the user first.
+        This reduces unnecessary ticket creation.
+
+        Power Automate HTTP action:
+        - Method: GET
+        - URI: https://saconsulting-freshservice-api-gzarfrhvbharcwfe.ukwest-01.azurewebsites.net/manager/knowledge-base/search?query=wifi+issue
+        - Header: x-api-key = 6730455c35b58822512404656522c30eb7dbb2d72650e0b703094a46c884db56
+      parameters:
+        - name: query
+          in: query
+          required: true
+          description: The search term e.g. 'wifi not working'
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Knowledge base search results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  result_count:
+                    type: integer
+                  articles:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        title:
+                          type: string
+                        category:
+                          type: string
+                  summary:
+                    type: string
+                  error_message:
+                    type: string
+
+  /manager/tickets/{ticket_id}/assign:
+    put:
+      tags:
+        - Manager & Admin
+      summary: Assign ticket to an agent
+      description: |
+        Assigns an existing ticket to a specific IT agent by their email.
+        Managers use this when they see an unassigned or incorrectly assigned ticket.
+
+        Power Automate HTTP action:
+        - Method: PUT
+        - URI: https://saconsulting-freshservice-api-gzarfrhvbharcwfe.ukwest-01.azurewebsites.net/manager/tickets/145/assign?agent_email=agent@company.com
+        - Header: x-api-key = 6730455c35b58822512404656522c30eb7dbb2d72650e0b703094a46c884db56
+      parameters:
+        - name: ticket_id
+          in: path
+          required: true
+          description: The ticket ID
+          schema:
+            type: integer
+        - name: agent_email
+          in: query
+          required: true
+          description: Email of the agent to assign the ticket to
+          schema:
+            type: string
+            format: email
+      responses:
+        "200":
+          description: Ticket assigned
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                  ticket_id:
+                    type: integer
+                  assigned_to:
+                    type: string
+
+  /manager/tickets/{ticket_id}/resolve:
+    post:
+      tags:
+        - Manager & Admin
+      summary: Resolve a ticket
+      description: |
+        Marks a ticket as Resolved and adds a resolution note.
+        The requester gets an email notification automatically.
+        Only agents and managers can resolve tickets.
+
+        Power Automate HTTP action:
+        - Method: POST
+        - URI: https://saconsulting-freshservice-api-gzarfrhvbharcwfe.ukwest-01.azurewebsites.net/manager/tickets/147/resolve?resolution_note=Reinstalled+WiFi+driver
+        - Header: x-api-key = 6730455c35b58822512404656522c30eb7dbb2d72650e0b703094a46c884db56
+      parameters:
+        - name: ticket_id
+          in: path
+          required: true
+          description: The ticket ID
+          schema:
+            type: integer
+        - name: resolution_note
+          in: query
+          required: true
+          description: What fixed the issue? Minimum 10 characters.
+          schema:
+            type: string
+            minLength: 10
+      responses:
+        "200":
+          description: Ticket resolved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  ticket_id:
+                    type: integer
+                  message:
+                    type: string
+
+  /manager/tickets/{ticket_id}/close:
+    post:
+      tags:
+        - Manager & Admin
+      summary: Permanently close a ticket
+      description: |
+        Sets ticket status to Closed (5). Unlike Resolved (4), a closed ticket cannot be reopened by the requester.
+        Adds a private closing note before closing.
+        Only agents and managers can close tickets.
+
+        Power Automate HTTP action:
+        - Method: POST
+        - URI: https://saconsulting-freshservice-api-gzarfrhvbharcwfe.ukwest-01.azurewebsites.net/manager/tickets/147/close?closing_note=Ticket+was+duplicate
+        - Header: x-api-key = 6730455c35b58822512404656522c30eb7dbb2d72650e0b703094a46c884db56
+      parameters:
+        - name: ticket_id
+          in: path
+          required: true
+          description: The ticket ID
+          schema:
+            type: integer
+        - name: closing_note
+          in: query
+          required: true
+          description: Reason for closing the ticket. Minimum 5 characters.
+          schema:
+            type: string
+            minLength: 5
+      responses:
+        "200":
+          description: Ticket closed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  ticket_id:
+                    type: integer
+                  message:
+                    type: string
+
+  /manager/tickets/{ticket_id}/assignee:
+    get:
+      tags:
+        - Manager & Admin
+      summary: Get the agent assigned to a specific ticket
+      description: |
+        Returns the full name and email of the agent currently assigned to the given ticket.
+        Returns assigned=false if the ticket has no agent yet.
+
+        Power Automate HTTP action:
+        - Method: GET
+        - URI: https://saconsulting-freshservice-api-gzarfrhvbharcwfe.ukwest-01.azurewebsites.net/manager/tickets/147/assignee
+        - Header: x-api-key = 6730455c35b58822512404656522c30eb7dbb2d72650e0b703094a46c884db56
+      parameters:
+        - name: ticket_id
+          in: path
+          required: true
+          description: The ticket ID
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Ticket assignee information
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  ticket_id:
+                    type: integer
+                  assigned:
+                    type: boolean
+                  agent_name:
+                    type: string
+                  agent_email:
+                    type: string
+                  message:
+                    type: string
+
+  /manager/tickets/{ticket_id}:
+    put:
+      tags:
+        - Manager & Admin
+      summary: Update a ticket (Manager version)
+      description: |
+        Updates a ticket's priority and/or status.
+        Only agents and managers can update tickets.
+        Send 0 for any field you do not want to change.
+
+        Power Automate HTTP action:
+        - Method: PUT
+        - URI: https://saconsulting-freshservice-api-gzarfrhvbharcwfe.ukwest-01.azurewebsites.net/manager/tickets/147?new_priority=3&new_status=2
+        - Header: x-api-key = 6730455c35b58822512404656522c30eb7dbb2d72650e0b703094a46c884db56
+      parameters:
+        - name: ticket_id
+          in: path
+          required: true
+          description: The ticket ID
+          schema:
+            type: integer
+        - name: new_priority
+          in: query
+          required: false
+          description: 1=Low, 2=Medium, 3=High, 4=Urgent. Send 0 to skip.
+          schema:
+            type: integer
+            default: 0
+        - name: new_status
+          in: query
+          required: false
+          description: 2=Open, 3=Pending, 4=Resolved, 5=Closed. Send 0 to skip.
+          schema:
+            type: integer
+            default: 0
+      responses:
+        "200":
+          description: Ticket updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+
+  /manager/reports/weekly:
+    get:
+      tags:
+        - Manager & Admin
+      summary: Get weekly IT support performance report
+      description: |
+        Returns a summary of IT support activity for the past 7 days.
+        Includes tickets created, resolved, still open, average resolution time,
+        and breakdown by priority.
+        Managers can copy this directly into a management report.
+
+        Power Automate HTTP action:
+        - Method: GET
+        - URI: https://saconsulting-freshservice-api-gzarfrhvbharcwfe.ukwest-01.azurewebsites.net/manager/reports/weekly
+        - Header: x-api-key = 6730455c35b58822512404656522c30eb7dbb2d72650e0b703094a46c884db56
+      responses:
+        "200":
+          description: Weekly report data
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+
+  /manager/tickets/unassigned:
+    get:
+      tags:
+        - Manager & Admin
+      summary: Get all open tickets with no agent assigned
+      description: |
+        Returns every open ticket that currently has no IT agent assigned to it.
+        Unassigned tickets are the biggest SLA risk - open but nobody working on them.
+        Use this with the Assign Ticket endpoint to quickly distribute the work.
+
+        Power Automate HTTP action:
+        - Method: GET
+        - URI: https://saconsulting-freshservice-api-gzarfrhvbharcwfe.ukwest-01.azurewebsites.net/manager/tickets/unassigned
+        - Header: x-api-key = 6730455c35b58822512404656522c30eb7dbb2d72650e0b703094a46c884db56
+      responses:
+        "200":
+          description: Unassigned tickets list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  ticket_count:
+                    type: integer
+                  tickets:
+                    type: array
+                    items:
+                      type: object
+                  summary:
+                    type: string
+                  message:
+                    type: string

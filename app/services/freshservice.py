@@ -253,26 +253,76 @@ async def update_ticket(ticket_id: int, updates: dict) -> dict:
 
 
 # ── ADD NOTE TO TICKET ─────────────────────────────────────────────────────────
-async def add_note(ticket_id: int, body: str, private: bool = True) -> dict:
+# async def add_note(ticket_id: int, body: str, private: bool = True) -> dict:
+#     """
+#     Adds a note/comment to an existing ticket.
+
+#     Args:
+#         ticket_id: The ticket to comment on
+#         body:      The note text
+#         private:   True = internal note (only agents see it)
+#                    False = public reply (requester gets notified)
+
+#     Returns:
+#         Raw note response from Freshservice
+#     """
+#     async with _get_client() as client:
+#         response = await client.post(
+#             f"/tickets/{ticket_id}/notes",
+#             json={"body": body, "private": private},
+#         )
+#         response.raise_for_status()
+#         return response.json()
+
+# ==== NEWEST NEW ADD NOTE WITH AUTHOR VERIFICATION AND ATTRIBUTION — PASTE THIS INSTEAD OF THE ABOVE ====
+
+async def add_note(
+    ticket_id:    int,
+    body:         str,
+    private:      bool = True,
+    author_name:  str  = "",
+    author_email: str  = "",
+) -> dict:
     """
     Adds a note/comment to an existing ticket.
 
     Args:
-        ticket_id: The ticket to comment on
-        body:      The note text
-        private:   True = internal note (only agents see it)
-                   False = public reply (requester gets notified)
+        ticket_id:    The ticket to add the note to
+        body:         The note text
+        private:      True  = internal note (only agents see it)
+                      False = public reply (requester gets notified by email)
+        author_name:  Display name of the person adding the note
+        author_email: Email of the person adding the note
 
-    Returns:
-        Raw note response from Freshservice
+    When author_name is provided, it is prepended to the note body so that
+    Freshservice shows who wrote it — otherwise all notes appear to come
+    from the API key owner.
     """
+    # Prefix the note with author attribution when a name is supplied
+    if author_name:
+        formatted_body = (
+            f"📝 Note by: {author_name}"
+            + (f" ({author_email})" if author_email else "")
+            + f"\n{'─' * 40}\n"
+            + body
+        )
+    else:
+        formatted_body = body
+
     async with _get_client() as client:
         response = await client.post(
             f"/tickets/{ticket_id}/notes",
-            json={"body": body, "private": private},
+            json={"body": formatted_body, "private": private},
         )
         response.raise_for_status()
-        return response.json()
+
+        return {
+            "ticket_id":    ticket_id,
+            "private":      private,
+            "author_name":  author_name  or "Unknown",
+            "author_email": author_email or "",
+            "message":      f"Note added to ticket #{ticket_id}.",
+        }
 
 
 
